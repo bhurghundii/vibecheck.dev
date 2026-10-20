@@ -8,10 +8,14 @@ winning transaction has committed by the time the conflicting insert returns.
 An expired pending session is re-issued a fresh token and expiry in place, so
 re-running the check doesn't leave the PR stuck at pending. The old link stops
 working.
+
+Pre-commit sessions follow the same pattern, keyed by (repo, sha256 of the
+staged diff) through the partial index from V2.
 """
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -107,6 +111,81 @@ async def fetch_session_by_pr(
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 _SELECT_SQL, {"repo": repo, "pr_number": pr_number, "head_sha": head_sha}
+            )
+            return await cur.fetchone()
+
+
+_INSERT_PRE_COMMIT_SQL = """
+    INSERT INTO sessions
+        (source, repo, diff_sha256, diff, question, questions,
+         interpretation, token, status, expires_at)
+    VALUES
+        ('pre_commit', %(repo)s, %(diff_sha256)s, %(diff)s,
+         %(question)s, %(questions)s, %(interpretation)s, %(token)s,
+         'pending', %(expires_at)s)
+    ON CONFLICT (repo, diff_sha256) WHERE source = 'pre_commit' DO UPDATE
+        SET token = EXCLUDED.token, expires_at = EXCLUDED.expires_at
+        WHERE sessions.status = 'pending' AND sessions.expires_at < now()
+    RETURNING *
+"""
+
+_SELECT_PRE_COMMIT_SQL = """
+    SELECT * FROM sessions
+    WHERE source = 'pre_commit' AND repo = %(repo)s AND diff_sha256 = %(diff_sha256)s
+"""
+
+
+def diff_sha256(diff: str) -> str:
+    """A pre-commit session's identity. Computed here, never taken from the
+    client, so a hook can't claim a passed session for content it didn't send."""
+    return hashlib.sha256(diff.encode("utf-8")).hexdigest()
+
+
+async def create_or_get_pre_commit_session(
+    pool: AsyncConnectionPool,
+    *,
+    repo: str,
+    diff: str,
+    question: str,
+    questions: list[dict[str, Any]],
+    interpretation: str,
+    token: str,
+    ttl_days: int,
+) -> tuple[dict[str, Any], bool]:
+    """create_or_get_session for staged changes, keyed by (repo, sha256(diff))."""
+    digest = diff_sha256(diff)
+    params = {
+        "repo": repo,
+        "diff_sha256": digest,
+        "diff": diff,
+        "question": question,
+        "questions": Jsonb(questions),
+        "interpretation": interpretation,
+        "token": token,
+        "expires_at": datetime.now(UTC) + timedelta(days=ttl_days),
+    }
+
+    async with pool.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(_INSERT_PRE_COMMIT_SQL, params)
+            row = await cur.fetchone()
+            if row is not None:
+                return row, True
+
+            # A skipped insert means the conflicting row exists and has committed,
+            # and nothing deletes sessions, so this always finds it.
+            await cur.execute(_SELECT_PRE_COMMIT_SQL, {"repo": repo, "diff_sha256": digest})
+            return await cur.fetchone(), False
+
+
+async def fetch_pre_commit_session(
+    pool: AsyncConnectionPool, *, repo: str, diff: str
+) -> dict[str, Any] | None:
+    """The pre-commit session for this staged diff, if any; lets the endpoint skip the model calls."""
+    async with pool.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                _SELECT_PRE_COMMIT_SQL, {"repo": repo, "diff_sha256": diff_sha256(diff)}
             )
             return await cur.fetchone()
 
