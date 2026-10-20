@@ -42,6 +42,7 @@ nav:
   - Using vibecheck:
       - Wire it into a repo: wire-it-up.md
       - Blocking PRs: blocking-prs.md
+      - Check commits before they land: pre-commit.md
       - Configuration: configuration.md
   - Running it:
       - Deploying to Railway: deploy-railway.md

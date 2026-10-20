@@ -21,6 +21,13 @@
 
 **Added**
 
+- A git pre-commit hook (`scripts/pre_commit_hook.py`, also published
+  as `.pre-commit-hooks.yaml` for the pre-commit framework) that quizzes
+  the author on their staged diff before the commit lands, through the new
+  `POST /pre-commit/sessions` endpoint. It fails open on outages and
+  misconfiguration and posts no commit status. The PR gate is unchanged.
+  See `docs/pre-commit.md`.
+
 - `EVALUATOR`, a JSON config of checks that reject a PR before grumpy asks
   anything. The first is `size`: more than 1000 changed lines (added +
   removed, outside lockfiles by default) and `POST /sessions` returns `422`
