@@ -301,3 +301,39 @@ def test_missing_token_is_reported_under_the_new_name(monkeypatch, tmp_path) -> 
 
     with pytest.raises(SystemExit, match="VIBECHECK_TOKEN"):
         get_settings()
+
+
+def test_anthropic_is_the_default_provider(monkeypatch) -> None:
+    _set_required_env(monkeypatch, token=secrets.token_urlsafe(16))
+    monkeypatch.setenv("MODEL_PROVIDER", "")
+    assert Settings().model_provider == "anthropic"
+
+
+def test_bedrock_needs_no_model_api_key(monkeypatch) -> None:
+    _set_required_env(monkeypatch, token=secrets.token_urlsafe(16))
+    monkeypatch.setenv("FAKE_GRADER", "false")
+    monkeypatch.setenv("MODEL_PROVIDER", "bedrock")
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    settings = Settings()
+    assert settings.model_provider == "bedrock"
+    assert settings.aws_region == "eu-west-1"
+
+
+def test_bedrock_requires_model_id_and_region(monkeypatch) -> None:
+    _set_required_env(monkeypatch, token=secrets.token_urlsafe(16))
+    monkeypatch.setenv("FAKE_GRADER", "false")
+    monkeypatch.setenv("MODEL_PROVIDER", "bedrock")
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "")
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    with pytest.raises(ValidationError, match="BEDROCK_MODEL_ID and AWS_REGION"):
+        Settings()
+
+
+def test_unknown_provider_is_rejected(monkeypatch) -> None:
+    _set_required_env(monkeypatch, token=secrets.token_urlsafe(16))
+    monkeypatch.setenv("MODEL_PROVIDER", "openai")
+    with pytest.raises(ValidationError, match="model_provider"):
+        Settings()

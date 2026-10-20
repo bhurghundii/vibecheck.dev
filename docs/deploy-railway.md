@@ -13,7 +13,7 @@ The reference deployment of vibecheck runs on [Railway](https://railway.com). No
    | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (a reference to the Postgres service; adjust the name if you renamed it) |
    | `VIBECHECK_TOKEN` | output of `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
    | `FAKE_GRADER` | `true` to try it out, `false` for real grading |
-   | `MODEL_API_KEY` | your Anthropic API key (only needed when `FAKE_GRADER=false`) |
+   | `MODEL_API_KEY` | your Anthropic API key (only needed when `FAKE_GRADER=false`; or set `MODEL_PROVIDER=bedrock` and the [Bedrock variables](configuration.md#amazon-bedrock) instead) |
    | `PORT` | `8000` — the container always listens on 8000, so tell Railway to route there |
    | `VIBECHECK_BASE_URL` | filled in after the next step |
    | `GITHUB_STATUS_TOKEN` | a fine-grained GitHub token with *Commit statuses: read and write* on the repos you'll gate — lets vibecheck post the `vibecheck/verdict` check |

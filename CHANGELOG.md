@@ -21,6 +21,14 @@
 
 **Added**
 
+- Amazon Bedrock as a grading backend. Set `MODEL_PROVIDER=bedrock`,
+  `BEDROCK_MODEL_ID` and `AWS_REGION` to grade through Bedrock's Converse
+  API in your own AWS account, with any Converse-capable model.
+  Credentials come from the standard AWS chain (env vars, profile, task or
+  instance role, IRSA) or a Bedrock API key in `AWS_BEARER_TOKEN_BEDROCK`.
+  `MODEL_PROVIDER` defaults to `anthropic`, so nothing changes unless you
+  set it.
+
 - `EVALUATOR`, a JSON config of checks that reject a PR before grumpy asks
   anything. The first is `size`: more than 1000 changed lines (added +
   removed, outside lockfiles by default) and `POST /sessions` returns `422`

@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.ai.grading import FakeGrader, GradingError, RealGrader
+from app.ai.grading import BedrockGrader, FakeGrader, GradingError, RealGrader
 from app.auth.bearer import require_bearer_token
 from app.auth.repos import require_allowed_repo
 from app.config import get_settings
@@ -53,6 +53,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if settings.fake_grader:
         app.state.grader = FakeGrader()
+    elif settings.model_provider == "bedrock":
+        bearer = settings.aws_bearer_token_bedrock
+        app.state.grader = BedrockGrader(
+            model_id=settings.bedrock_model_id,
+            region=settings.aws_region,
+            bearer_token=bearer.get_secret_value() if bearer else None,
+            max_tokens=settings.bedrock_max_tokens,
+            endpoint_url=settings.bedrock_endpoint_url,
+            meaniemode=settings.meaniemode,
+        )
+        startup_logger.info(
+            f"grading via Amazon Bedrock model {settings.bedrock_model_id}",
+            extra={"outcome": "bedrock"},
+        )
     else:
         app.state.grader = RealGrader(
             api_key=settings.model_api_key.get_secret_value(), meaniemode=settings.meaniemode

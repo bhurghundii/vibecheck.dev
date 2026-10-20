@@ -4,7 +4,7 @@ https://github.com/user-attachments/assets/497f427e-182e-4446-ac0c-ed6f1ad8ea28
 
 **vibecheck is a self-hosted merge gate for GitHub pull requests. Before a PR can merge, the person who opened it has to show they understand their own change.**
 
-This is self-hosted. You will need to host the Docker container plus a Postgres database, on your own server or cloud account. It is BYOK (Anthropic Claude)
+This is self-hosted. You will need to host the Docker container plus a Postgres database, on your own server or cloud account. It is BYOK: an Anthropic API key, or [Amazon Bedrock](https://bhurghundii.com/vibecheck.dev/configuration/#amazon-bedrock) in your own AWS account
 
 ## How it works
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Literal
 
 from pydantic import (
     AliasChoices,
@@ -165,7 +166,50 @@ class Settings(BaseSettings):
 
     # Required, no default: choosing the grader is deliberately explicit.
     fake_grader: bool = Field(...)
+
+    # Which API the real grader calls: "anthropic" (MODEL_API_KEY) or
+    # "bedrock" (Amazon Bedrock, for self-hosting inside an AWS account).
+    model_provider: Literal["anthropic", "bedrock"] = "anthropic"
     model_api_key: SecretStr | None = None
+
+    # Bedrock only. Credentials come from the standard AWS chain (env vars,
+    # AWS_PROFILE, ECS task role, EC2 instance profile, IRSA) unless a Bedrock
+    # API key is given in AWS_BEARER_TOKEN_BEDROCK.
+    bedrock_model_id: str | None = Field(
+        default=None,
+        description=(
+            "Bedrock model or inference profile ID/ARN, e.g. "
+            "'us.anthropic.claude-sonnet-4-5-20250929-v1:0' or 'amazon.nova-pro-v1:0'"
+        ),
+    )
+    aws_region: str | None = Field(
+        default=None, validation_alias=AliasChoices("aws_region", "aws_default_region")
+    )
+    aws_bearer_token_bedrock: SecretStr | None = None
+    # Mirrors app.ai.grading.DEFAULT_BEDROCK_MAX_TOKENS.
+    bedrock_max_tokens: int = Field(default=4096, ge=1)
+    # For a VPC interface endpoint or a gateway in front of Bedrock.
+    bedrock_endpoint_url: str | None = None
+
+    @field_validator("model_provider", mode="before")
+    @classmethod
+    def _default_blank_provider(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().lower() or "anthropic"
+        return value
+
+    @field_validator(
+        "bedrock_model_id",
+        "aws_region",
+        "bedrock_endpoint_url",
+        mode="before",
+    )
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        """docker-compose passes unset variables through as empty strings."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("vibecheck_token")
     @classmethod
@@ -187,10 +231,24 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def _require_model_key_unless_fake(self) -> Settings:
-        if not self.fake_grader and not (
-            self.model_api_key and self.model_api_key.get_secret_value()
-        ):
+    def _require_model_config_unless_fake(self) -> Settings:
+        if self.fake_grader:
+            return self
+        if self.model_provider == "bedrock":
+            missing = [
+                name
+                for name, value in (
+                    ("BEDROCK_MODEL_ID", self.bedrock_model_id),
+                    ("AWS_REGION", self.aws_region),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    f"{' and '.join(missing)} required when MODEL_PROVIDER=bedrock "
+                    "and FAKE_GRADER=false"
+                )
+        elif not (self.model_api_key and self.model_api_key.get_secret_value()):
             raise ValueError("MODEL_API_KEY is required when FAKE_GRADER=false")
         return self
 

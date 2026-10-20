@@ -1,4 +1,5 @@
-"""Grading behind a protocol, over async httpx against the raw Messages API (no SDK).
+"""Grading behind a protocol, over async httpx against the raw Messages API (no SDK),
+or against Amazon Bedrock's Converse API for self-hosting inside AWS.
 
 interpret reads the diff blind, once, at session creation, so no answer is in
 view to rationalise toward. generate_exam writes the questions, and
@@ -10,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -21,6 +23,10 @@ PROMPT_VERSION = "v8"
 
 _API_URL = "https://api.anthropic.com/v1/messages"
 _API_VERSION = "2023-06-01"
+
+# Bedrock serves models with smaller output limits than Claude's, and every
+# reply here is short: a few questions, a mark, or two paragraphs.
+DEFAULT_BEDROCK_MAX_TOKENS = 4096
 
 # Fixed first question; it covers the whole change, so it has no line anchor.
 HIGH_LEVEL_QUESTION = "How does this change work on a high level?"
@@ -256,6 +262,7 @@ class RealGrader:
         meaniemode: bool = False,
     ) -> None:
         self._api_key = api_key
+        self._model = MODEL
         self._client_factory = client_factory or (lambda: httpx.AsyncClient(timeout=timeout))
         self._meaniemode = meaniemode
 
@@ -315,7 +322,10 @@ class RealGrader:
         except Exception as exc:  # httpx errors, timeouts, anything unexpected
             raise GradingError(f"grading call failed: {exc}") from exc
         return QuestionMark(
-            passed=mark["passed"], note=mark["note"], model=MODEL, prompt_version=PROMPT_VERSION
+            passed=mark["passed"],
+            note=mark["note"],
+            model=self._model,
+            prompt_version=PROMPT_VERSION,
         )
 
     async def explain(self, interpretation: str, question: str) -> str:
@@ -371,30 +381,148 @@ class RealGrader:
             "anthropic-version": _API_VERSION,
             "content-type": "application/json",
         }
+        return await _post_with_retries(client, _API_URL, headers, json.dumps(body).encode())
 
-        # Retry a transient 429/529; grading runs inside the developer's request.
-        last_exc: Exception | None = None
-        for attempt in range(_MAX_ATTEMPTS):
-            try:
-                response = await client.post(_API_URL, headers=headers, json=body)
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code not in _RETRYABLE_STATUS:
-                    raise
-                last_exc = exc
-                delay = _retry_delay(exc.response, attempt)
-            except httpx.TransportError as exc:
-                last_exc = exc
-                delay = _backoff_delay(attempt)
 
-            if attempt == _MAX_ATTEMPTS - 1:
-                break
-            await asyncio.sleep(delay)
+class BedrockGrader(RealGrader):
+    """RealGrader over Amazon Bedrock's Converse API, for self-hosting inside
+    AWS with any Bedrock model (Claude, Nova, Llama, Mistral...).
 
-        raise GradingError(
-            f"model API call failed after {_MAX_ATTEMPTS} attempts: {last_exc}"
-        ) from last_exc
+    Requests are SigV4-signed with the standard AWS credential chain (env vars,
+    shared config/profile, ECS task role, EC2 instance profile, IRSA), or sent
+    with a Bedrock API key as a bearer token when one is given. Converse has no
+    structured-output mode that every model honours, so a JSON reply is asked
+    for in the system prompt and parsed as defensively as the Anthropic one.
+    """
+
+    def __init__(
+        self,
+        model_id: str,
+        region: str,
+        *,
+        bearer_token: str | None = None,
+        max_tokens: int = DEFAULT_BEDROCK_MAX_TOKENS,
+        endpoint_url: str | None = None,
+        timeout: float = 120.0,
+        client_factory: Callable[[], httpx.AsyncClient] | None = None,
+        meaniemode: bool = False,
+        credentials_provider: Callable[[], Any] | None = None,
+    ) -> None:
+        super().__init__(
+            api_key="", timeout=timeout, client_factory=client_factory, meaniemode=meaniemode
+        )
+        self._model = model_id
+        self._region = region
+        self._bearer_token = bearer_token or None
+        self._max_tokens = max_tokens
+        base = (endpoint_url or f"https://bedrock-runtime.{region}.amazonaws.com").rstrip("/")
+        # A model ID can be an ARN, so escape its '/' and ':' too.
+        self._url = f"{base}/model/{urllib.parse.quote(model_id, safe='')}/converse"
+        self._credentials_provider = credentials_provider or _default_aws_credentials
+        self._credentials: Any = None
+
+    async def _call(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        system: str,
+        user_content: str,
+        output_schema: dict | None = None,
+    ) -> dict:
+        if output_schema is not None:
+            system = (
+                f"{system}\n\nRespond with only a JSON object, with no prose before or "
+                "after it and no code fences, that matches this JSON Schema:\n"
+                f"{json.dumps(output_schema)}"
+            )
+        body = {
+            "system": [{"text": system}],
+            "messages": [{"role": "user", "content": [{"text": user_content}]}],
+            "inferenceConfig": {"maxTokens": self._max_tokens},
+        }
+        content = json.dumps(body).encode()
+        headers = await self._auth_headers(content)
+        data = await _post_with_retries(client, self._url, headers, content)
+        return self._to_messages_shape(data)
+
+    async def _auth_headers(self, content: bytes) -> dict[str, str]:
+        headers = {"content-type": "application/json"}
+        if self._bearer_token:
+            headers["authorization"] = f"Bearer {self._bearer_token}"
+            return headers
+
+        from botocore.auth import SigV4Auth
+        from botocore.awsrequest import AWSRequest
+
+        # Resolving can hit the instance metadata service, and a refresh can
+        # too, so neither runs on the event loop.
+        if self._credentials is None:
+            self._credentials = await asyncio.to_thread(self._credentials_provider)
+        if self._credentials is None:
+            raise GradingError(
+                "no AWS credentials found for Bedrock: set AWS_ACCESS_KEY_ID/"
+                "AWS_SECRET_ACCESS_KEY, AWS_PROFILE, an instance or task role, "
+                "or AWS_BEARER_TOKEN_BEDROCK"
+            )
+        frozen = await asyncio.to_thread(self._credentials.get_frozen_credentials)
+        request = AWSRequest(method="POST", url=self._url, data=content, headers=headers)
+        SigV4Auth(frozen, "bedrock", self._region).add_auth(request)
+        return dict(request.headers.items())
+
+    def _to_messages_shape(self, data: dict) -> dict:
+        """Reshape a Converse reply into the Messages API shape the shared
+        parsing expects. Reasoning models put reasoningContent blocks before
+        the text, so take the text blocks only."""
+        stop_reason = data.get("stopReason")
+        if stop_reason in ("guardrail_intervened", "content_filtered"):
+            raise GradingError(f"model declined to respond ({stop_reason})")
+        if stop_reason == "max_tokens":
+            raise GradingError(f"model hit the {self._max_tokens}-token cap before finishing")
+        blocks = (data.get("output") or {}).get("message", {}).get("content", [])
+        texts = [
+            b["text"] for b in blocks if isinstance(b, dict) and isinstance(b.get("text"), str)
+        ]
+        if not texts:
+            raise GradingError(f"model response contained no text block: {data!r}")
+        return {"content": [{"type": "text", "text": "".join(texts)}], "stop_reason": stop_reason}
+
+
+def _default_aws_credentials() -> Any:
+    """The standard AWS credential chain, as the AWS CLI and SDKs resolve it."""
+    import botocore.session
+
+    return botocore.session.get_session().get_credentials()
+
+
+async def _post_with_retries(
+    client: httpx.AsyncClient, url: str, headers: dict[str, str], content: bytes
+) -> dict:
+    """POST content, retrying a transient 429/5xx; grading runs inside the
+    developer's request. content is pre-serialised so a signature over it holds."""
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            response = await client.post(url, headers=headers, content=content)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in _RETRYABLE_STATUS:
+                raise GradingError(
+                    f"model API returned {exc.response.status_code}: {exc.response.text[:500]}"
+                ) from exc
+            last_exc = exc
+            delay = _retry_delay(exc.response, attempt)
+        except httpx.TransportError as exc:
+            last_exc = exc
+            delay = _backoff_delay(attempt)
+
+        if attempt == _MAX_ATTEMPTS - 1:
+            break
+        await asyncio.sleep(delay)
+
+    raise GradingError(
+        f"model API call failed after {_MAX_ATTEMPTS} attempts: {last_exc}"
+    ) from last_exc
 
 
 def _backoff_delay(attempt: int) -> float:

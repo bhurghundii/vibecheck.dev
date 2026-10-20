@@ -15,4 +15,4 @@ Migrations (`migrations/*.sql`) apply automatically on startup via a small built
 
 ## Tech stack
 
-Python, FastAPI, `uv`, psycopg3 (async, raw SQL, no ORM), Postgres 16, server-rendered Jinja2 templates. The only client-side JavaScript is a small paste guard on the answer box (`app/web/static/nopaste.js`); every page works without it. Grading calls the Anthropic Messages API directly over async httpx. See `pyproject.toml` for exact versions.
+Python, FastAPI, `uv`, psycopg3 (async, raw SQL, no ORM), Postgres 16, server-rendered Jinja2 templates. The only client-side JavaScript is a small paste guard on the answer box (`app/web/static/nopaste.js`); every page works without it. Grading calls the Anthropic Messages API, or Amazon Bedrock's Converse API (signed with `botocore`), directly over async httpx. See `pyproject.toml` for exact versions.
