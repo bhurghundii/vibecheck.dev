@@ -42,6 +42,19 @@ _RESTART_OFF = {
     "heading": "Start over is off",
     "message": "This deployment doesn't allow restarting. Push a new commit to get a fresh attempt.",
 }
+# A pre-commit author is at the commit prompt with no PR or pushed commit yet,
+# so the PR wording above would tell them to do something they can't.
+_EXPIRED_PRE_COMMIT = {
+    "heading": "This session expired",
+    "message": "Run your commit again to get a fresh link.",
+}
+_RESTART_OFF_PRE_COMMIT = {
+    "heading": "Start over is off",
+    "message": (
+        "This deployment doesn't allow restarting. "
+        "To get a fresh attempt, change the staged content and commit again."
+    ),
+}
 _ALREADY_DECIDED = {
     "heading": "Already answered",
     "message": "This session already has a verdict and can't be answered again.",
@@ -127,6 +140,28 @@ def _resolve_step(raw: str | None, frontier: int, total: int) -> int:
         return min(max(int(raw), 0), highest)
     except (TypeError, ValueError):
         return highest
+
+
+def _is_pre_commit(session: dict) -> bool:
+    return session.get("source") == "pre_commit"
+
+
+def _expired(session: dict) -> dict:
+    return _EXPIRED_PRE_COMMIT if _is_pre_commit(session) else _EXPIRED
+
+
+async def _publish(request: Request, session: dict, status: str) -> None:
+    """Post the commit status for a PR session. A pre-commit session has no
+    commit on GitHub to post to; the hook reads its status back instead."""
+    if _is_pre_commit(session):
+        return
+    settings = request.app.state.settings
+    await request.app.state.status_publisher.publish(
+        repo=session["repo"],
+        head_sha=session["head_sha"],
+        status=status,
+        target_url=build_session_url(settings.vibecheck_base_url, session["token"]),
+    )
 
 
 def _is_expired(session: dict) -> bool:
@@ -238,7 +273,7 @@ async def view_session(request: Request, token: str) -> HTMLResponse:
         return _render_result(request, session, questions, marks)
 
     if session["status"] == "pending" and _is_expired(session):
-        return templates.TemplateResponse(request, "error.html", _EXPIRED, status_code=410)
+        return templates.TemplateResponse(request, "error.html", _expired(session), status_code=410)
 
     frontier = _frontier(marks, len(questions))
     number = _resolve_step(raw_step, frontier, len(questions))
@@ -264,7 +299,7 @@ async def submit_answer(request: Request, token: str) -> HTMLResponse:
     if session["status"] in ("passed", "failed"):
         return templates.TemplateResponse(request, "error.html", _ALREADY_DECIDED, status_code=409)
     if _is_expired(session):
-        return templates.TemplateResponse(request, "error.html", _EXPIRED, status_code=410)
+        return templates.TemplateResponse(request, "error.html", _expired(session), status_code=410)
 
     questions, marks, frontier = _current_screen(session)
 
@@ -326,12 +361,7 @@ async def submit_answer(request: Request, token: str) -> HTMLResponse:
 
     # Only a terminal verdict is posted; an undecided session already shows pending.
     if written and status in ("passed", "failed"):
-        await request.app.state.status_publisher.publish(
-            repo=session["repo"],
-            head_sha=session["head_sha"],
-            status=status,
-            target_url=build_session_url(settings.vibecheck_base_url, token),
-        )
+        await _publish(request, session, status)
 
     # Post/redirect/get back to this screen.
     return RedirectResponse(url=f"/s/{token}?step={index}", status_code=303)
@@ -349,7 +379,7 @@ async def explain_question(request: Request, token: str) -> HTMLResponse:
     if session["status"] in ("passed", "failed"):
         return templates.TemplateResponse(request, "error.html", _ALREADY_DECIDED, status_code=409)
     if _is_expired(session):
-        return templates.TemplateResponse(request, "error.html", _EXPIRED, status_code=410)
+        return templates.TemplateResponse(request, "error.html", _expired(session), status_code=410)
 
     questions, marks, frontier = _current_screen(session)
     form = await request.form()
@@ -405,7 +435,8 @@ async def restart_walkthrough(request: Request, token: str) -> HTMLResponse:
     if session is None:
         return templates.TemplateResponse(request, "error.html", _NOT_FOUND, status_code=404)
     if not settings.allow_restart:
-        return templates.TemplateResponse(request, "error.html", _RESTART_OFF, status_code=403)
+        restart_off = _RESTART_OFF_PRE_COMMIT if _is_pre_commit(session) else _RESTART_OFF
+        return templates.TemplateResponse(request, "error.html", restart_off, status_code=403)
     if session["status"] != "failed":
         return RedirectResponse(url=f"/s/{token}", status_code=303)
 
@@ -452,12 +483,7 @@ async def restart_walkthrough(request: Request, token: str) -> HTMLResponse:
                 "head_sha": session["head_sha"],
             },
         )
-        await request.app.state.status_publisher.publish(
-            repo=session["repo"],
-            head_sha=session["head_sha"],
-            status="pending",
-            target_url=build_session_url(settings.vibecheck_base_url, token),
-        )
+        await _publish(request, session, "pending")
     return RedirectResponse(url=f"/s/{token}", status_code=303)
 
 
@@ -473,7 +499,7 @@ async def skip_current_question(request: Request, token: str) -> HTMLResponse:
     if session["status"] in ("passed", "failed"):
         return templates.TemplateResponse(request, "error.html", _ALREADY_DECIDED, status_code=409)
     if _is_expired(session):
-        return templates.TemplateResponse(request, "error.html", _EXPIRED, status_code=410)
+        return templates.TemplateResponse(request, "error.html", _expired(session), status_code=410)
 
     questions, marks, frontier = _current_screen(session)
     form = await request.form()
@@ -494,12 +520,7 @@ async def skip_current_question(request: Request, token: str) -> HTMLResponse:
     )
 
     if written and status in ("passed", "failed"):
-        await request.app.state.status_publisher.publish(
-            repo=session["repo"],
-            head_sha=session["head_sha"],
-            status=status,
-            target_url=build_session_url(settings.vibecheck_base_url, token),
-        )
+        await _publish(request, session, status)
 
     return RedirectResponse(url=f"/s/{token}?step={index}", status_code=303)
 

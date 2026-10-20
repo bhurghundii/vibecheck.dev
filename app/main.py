@@ -18,13 +18,19 @@ from app.auth.repos import require_allowed_repo
 from app.config import get_settings
 from app.db.migrations import run_migrations
 from app.db.pool import create_pool
-from app.db.sessions import build_session_url, create_or_get_session, fetch_session_by_pr
+from app.db.sessions import (
+    build_session_url,
+    create_or_get_pre_commit_session,
+    create_or_get_session,
+    fetch_pre_commit_session,
+    fetch_session_by_pr,
+)
 from app.db.verdict import fetch_verdict
 from app.evaluator import evaluate, question_count_for
 from app.github.commit_status import GitHubStatusPublisher, NullStatusPublisher
 from app.logging.config import configure_logging, redact_session_token
 from app.middleware import MaxBodySizeMiddleware
-from app.schemas import CreateSessionRequest
+from app.schemas import CreatePreCommitSessionRequest, CreateSessionRequest
 from app.web import router as web_router
 
 request_logger = logging.getLogger("vibecheck.request")
@@ -217,6 +223,61 @@ async def create_session(payload: CreateSessionRequest, request: Request) -> JSO
     )
     body = {
         "session_url": session_url,
+        "status": row["status"],
+        "question": row["question"],
+    }
+    return JSONResponse(status_code=201 if created else 200, content=body)
+
+
+@app.post("/pre-commit/sessions", dependencies=[Depends(require_bearer_token)])
+async def create_pre_commit_session(
+    payload: CreatePreCommitSessionRequest, request: Request
+) -> JSONResponse:
+    """POST /sessions for staged changes: the git pre-commit hook calls this on
+    every commit attempt and reads `status` back, so there is no separate
+    verdict endpoint. Nothing is posted to GitHub; there is no commit yet."""
+    request.state.repo = payload.repo
+
+    settings = app.state.settings
+    require_allowed_repo(settings, payload.repo)
+
+    rejection = evaluate(payload.diff, settings)
+    if rejection is not None:
+        return JSONResponse(status_code=422, content={"rejection": rejection})
+
+    # Same reuse rule as POST /sessions: the hook re-POSTs on every commit
+    # attempt, and only a first sight of this staged diff pays for the model.
+    existing = await fetch_pre_commit_session(app.state.pool, repo=payload.repo, diff=payload.diff)
+    if existing is not None:
+        interpretation = existing["interpretation"]
+        question_dicts = existing["questions"]
+        first_question = existing["question"]
+    else:
+        grader = app.state.grader
+        try:
+            interpretation = await grader.interpret(payload.diff)
+            questions = await grader.generate_exam(
+                payload.diff, question_count_for(payload.diff, settings)
+            )
+        except GradingError as exc:
+            return JSONResponse(
+                status_code=502, content={"detail": f"could not build the walkthrough: {exc}"}
+            )
+        question_dicts = [asdict(q) for q in questions]
+        first_question = questions[0].question
+
+    row, created = await create_or_get_pre_commit_session(
+        app.state.pool,
+        repo=payload.repo,
+        diff=payload.diff,
+        question=first_question,
+        questions=question_dicts,
+        interpretation=interpretation,
+        token=secrets.token_urlsafe(32),
+        ttl_days=settings.session_ttl_days,
+    )
+    body = {
+        "session_url": build_session_url(settings.vibecheck_base_url, row["token"]),
         "status": row["status"],
         "question": row["question"],
     }

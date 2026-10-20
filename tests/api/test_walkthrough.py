@@ -718,3 +718,250 @@ def test_start_over_is_off_by_default(vibecheck_env, database_url: str) -> None:
     assert "Start over" not in page.text
     assert resp.status_code == 403
     assert _status(database_url, token) == "failed"
+
+
+# --- pre-commit sessions ----------------------------------------------------
+# A pre-commit session has no commit to post a status to, and its author is at
+# the commit prompt, not on a PR, so both the publishing and the wording differ.
+
+
+class _RecordingPublisher:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def publish(self, **kwargs) -> None:
+        self.calls.append(kwargs)
+
+
+def _create_pre_commit_session(client: TestClient, token: str, *, repo: str) -> str:
+    response = client.post(
+        "/pre-commit/sessions", json={"repo": repo, "diff": _DIFF}, headers=_headers(token)
+    )
+    assert response.status_code == 201
+    return _token_from_url(response.json()["session_url"])
+
+
+def test_passing_a_pre_commit_session_posts_no_commit_status(vibecheck_env, database_url) -> None:
+    recorder = _RecordingPublisher()
+    with TestClient(app) as client:
+        token = _create_pre_commit_session(
+            client, vibecheck_env.token, repo=f"octo/pc-pass-{secrets.token_hex(4)}"
+        )
+        app.state.status_publisher = recorder
+        for i in range(3):
+            _pass_screen(client, token, i)
+
+    assert _status(database_url, token) == "passed"
+    assert recorder.calls == []
+
+
+def test_skipping_a_pre_commit_session_to_failure_posts_no_commit_status(
+    vibecheck_env, database_url
+) -> None:
+    recorder = _RecordingPublisher()
+    with TestClient(app) as client:
+        token = _create_pre_commit_session(
+            client, vibecheck_env.token, repo=f"octo/pc-skip-{secrets.token_hex(4)}"
+        )
+        app.state.status_publisher = recorder
+        for i in range(3):
+            _skip(client, token, i)
+
+    assert _status(database_url, token) == "failed"
+    assert recorder.calls == []
+
+
+def test_restarting_a_pre_commit_session_posts_no_commit_status(
+    restart_on, vibecheck_env, database_url
+) -> None:
+    recorder = _RecordingPublisher()
+    with TestClient(app) as client:
+        token = _create_pre_commit_session(
+            client, vibecheck_env.token, repo=f"octo/pc-restart-{secrets.token_hex(4)}"
+        )
+        for i in range(3):
+            _skip(client, token, i)
+        app.state.status_publisher = recorder
+        _restart(client, token)
+
+    assert _status(database_url, token) == "pending"
+    assert recorder.calls == []
+
+
+def test_a_pr_session_for_the_same_diff_still_posts_its_status(vibecheck_env) -> None:
+    recorder = _RecordingPublisher()
+    repo = f"octo/pc-and-pr-{secrets.token_hex(4)}"
+    with TestClient(app) as client:
+        _create_pre_commit_session(client, vibecheck_env.token, repo=repo)
+        token = _token_from_url(_create_session(client, vibecheck_env.token, repo=repo)["session_url"])
+        app.state.status_publisher = recorder
+        for i in range(3):
+            _pass_screen(client, token, i)
+
+    assert [c["status"] for c in recorder.calls] == ["passed"]
+    assert recorder.calls[0]["head_sha"] == _VALID_SHA
+
+
+def test_skipping_a_pr_session_to_failure_posts_failed(vibecheck_env) -> None:
+    # Failures elsewhere in this file go through /answer, so without this test the
+    # skip route's publish could be dropped for PR sessions and nothing would notice.
+    recorder = _RecordingPublisher()
+    repo = f"octo/pr-skip-{secrets.token_hex(4)}"
+    with TestClient(app) as client:
+        token = _token_from_url(_create_session(client, vibecheck_env.token, repo=repo)["session_url"])
+        app.state.status_publisher = recorder
+        for i in range(3):
+            _skip(client, token, i)
+
+    assert [c["status"] for c in recorder.calls] == ["failed"]
+    assert recorder.calls[0]["head_sha"] == _VALID_SHA
+
+
+def test_restarting_a_pr_session_posts_pending_again(restart_on, vibecheck_env) -> None:
+    recorder = _RecordingPublisher()
+    repo = f"octo/pr-restart-{secrets.token_hex(4)}"
+    with TestClient(app) as client:
+        token = _token_from_url(_create_session(client, vibecheck_env.token, repo=repo)["session_url"])
+        # The recorder goes in only after the session has failed, so the publishes
+        # made while failing it don't count towards the restart's single call.
+        _fail_session(client, token)
+        app.state.status_publisher = recorder
+        _restart(client, token)
+
+    assert [c["status"] for c in recorder.calls] == ["pending"]
+    assert recorder.calls[0]["head_sha"] == _VALID_SHA
+
+
+def test_expired_pre_commit_session_says_to_commit_again(vibecheck_env, database_url) -> None:
+    with TestClient(app) as client:
+        token = _create_pre_commit_session(
+            client, vibecheck_env.token, repo=f"octo/pc-exp-{secrets.token_hex(4)}"
+        )
+        _expire(database_url, token)
+        page = client.get(f"/s/{token}")
+
+    assert page.status_code == 410
+    assert "commit again" in page.text
+    assert "on the PR" not in page.text
+
+
+def test_expired_pr_session_keeps_the_pr_wording(vibecheck_env, database_url) -> None:
+    repo = f"octo/pr-exp-{secrets.token_hex(4)}"
+    with TestClient(app) as client:
+        token = _token_from_url(_create_session(client, vibecheck_env.token, repo=repo)["session_url"])
+        _expire(database_url, token)
+        page = client.get(f"/s/{token}")
+
+    assert "Re-run the check on the PR" in page.text
+
+
+def test_restart_off_on_a_pre_commit_session_says_to_change_the_staged_content(
+    vibecheck_env,
+) -> None:
+    with TestClient(app) as client:
+        token = _create_pre_commit_session(
+            client, vibecheck_env.token, repo=f"octo/pc-off-{secrets.token_hex(4)}"
+        )
+        for i in range(3):
+            _skip(client, token, i)
+        resp = _restart(client, token)
+
+    assert resp.status_code == 403
+    assert "change the staged content" in resp.text
+    assert "Push a new commit" not in resp.text
+
+
+def test_restart_off_on_a_pr_session_keeps_the_pr_wording(vibecheck_env) -> None:
+    repo = f"octo/pr-off-{secrets.token_hex(4)}"
+    with TestClient(app) as client:
+        token = _token_from_url(_create_session(client, vibecheck_env.token, repo=repo)["session_url"])
+        _fail_session(client, token)
+        resp = _restart(client, token)
+
+    assert "Push a new commit" in resp.text
+
+
+def test_pre_commit_screens_name_the_staged_changes_not_a_pr(vibecheck_env) -> None:
+    with TestClient(app) as client:
+        token = _create_pre_commit_session(
+            client, vibecheck_env.token, repo=f"octo/pc-head-{secrets.token_hex(4)}"
+        )
+        exam = client.get(f"/s/{token}")
+        for i in range(3):
+            _skip(client, token, i)
+        result = client.get(f"/s/{token}")
+
+    for page in (exam, result):
+        assert "staged changes" in page.text
+        assert "#None" not in page.text
+
+
+def test_pr_screens_still_name_the_pr_number(vibecheck_env) -> None:
+    repo = f"octo/pr-head-{secrets.token_hex(4)}"
+    with TestClient(app) as client:
+        token = _token_from_url(_create_session(client, vibecheck_env.token, repo=repo)["session_url"])
+        exam = client.get(f"/s/{token}")
+        _fail_session(client, token)
+        result = client.get(f"/s/{token}")
+
+    for page in (exam, result):
+        assert f"<h1>{repo} #1</h1>" in page.text
+        assert "staged changes" not in page.text
+
+
+# --- guards on every form POST ------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", ["answer", "explain", "skip", "restart"])
+def test_posting_to_an_unknown_token_is_404(vibecheck_env, action) -> None:
+    with TestClient(app) as client:
+        resp = client.post(f"/s/{secrets.token_urlsafe(16)}/{action}", data={"index": "0"})
+
+    assert resp.status_code == 404
+
+
+def test_explaining_a_decided_session_returns_409(vibecheck_env) -> None:
+    repo = f"octo/explain-decided-{secrets.token_hex(4)}"
+    with TestClient(app) as client:
+        token = _token_from_url(_create_session(client, vibecheck_env.token, repo=repo)["session_url"])
+        _fail_session(client, token)
+        resp = _explain(client, token, 3)
+
+    assert resp.status_code == 409
+
+
+def test_skipping_an_expired_session_returns_410(vibecheck_env, database_url) -> None:
+    repo = f"octo/skip-expired-{secrets.token_hex(4)}"
+    with TestClient(app) as client:
+        token = _token_from_url(_create_session(client, vibecheck_env.token, repo=repo)["session_url"])
+        _expire(database_url, token)
+        resp = _skip(client, token, 0)
+
+    assert resp.status_code == 410
+    assert _marks(database_url, token) == {}
+
+
+@pytest.mark.parametrize("action", ["answer", "explain", "skip"])
+def test_a_non_numeric_index_bounces_without_recording(vibecheck_env, database_url, action) -> None:
+    repo = f"octo/bad-index-{action}-{secrets.token_hex(4)}"
+    with TestClient(app) as client:
+        token = _token_from_url(_create_session(client, vibecheck_env.token, repo=repo)["session_url"])
+        resp = client.post(
+            f"/s/{token}/{action}",
+            data={"index": "first", "answer": "looks-good"},
+            follow_redirects=False,
+        )
+
+    assert resp.status_code == 303
+    assert _marks(database_url, token) == {}
+
+
+def test_a_scoped_screen_shows_its_file_and_line_range(vibecheck_env) -> None:
+    repo = f"octo/scoped-{secrets.token_hex(4)}"
+    with TestClient(app) as client:
+        token = _token_from_url(_create_session(client, vibecheck_env.token, repo=repo)["session_url"])
+        _pass_screen(client, token, 0)
+        page = client.get(f"/s/{token}?step=1")
+
+    assert "app/pay.py" in page.text
+    assert "lines 1–" in page.text
