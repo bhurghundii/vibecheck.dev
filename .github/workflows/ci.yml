@@ -31,6 +31,12 @@ jobs:
       - name: Lint
         run: uv run --with ruff ruff check .
 
+      # cfn-lint runs through `uv run --with`, like ruff, so it never
+      # becomes a project dependency. It exits non-zero on warnings as
+      # well as errors, so a warning fails this step too.
+      - name: Lint the CloudFormation template
+        run: uv run --with cfn-lint cfn-lint deploy/aws-ecs/vibecheck.yaml
+
       # The suite spins up its own Postgres 16 via Testcontainers; the
       # ubuntu-latest runner already has a working Docker daemon, and
       # tests/conftest.py's Docker Desktop workarounds are gated to macOS

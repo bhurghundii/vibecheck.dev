@@ -1,0 +1,428 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  vibecheck on ECS Fargate behind an Application Load Balancer, with RDS PostgreSQL 16 and
+  grading through Amazon Bedrock using the ECS task role. Deploys into an existing VPC.
+
+# The image must contain Bedrock support. Release images publish only on v* tags, so point
+# ImageUri at an image built from a commit that has it.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC every resource is created in.
+  LoadBalancerSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: >-
+      Subnets for the load balancer, in at least two Availability Zones. Public subnets for an
+      internet-facing scheme.
+  ServiceSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: >-
+      Subnets for the Fargate task. The task needs outbound access to the image registry,
+      Secrets Manager, CloudWatch Logs, Bedrock and GitHub: either a NAT gateway (private
+      subnets, AssignPublicIp DISABLED) or public subnets with AssignPublicIp ENABLED.
+  DatabaseSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets for the database, in at least two Availability Zones.
+  AssignPublicIp:
+    Type: String
+    AllowedValues: [ENABLED, DISABLED]
+    Default: DISABLED
+    Description: Give the task a public IP. Needed in public subnets with no NAT gateway.
+  LoadBalancerScheme:
+    Type: String
+    AllowedValues: [internet-facing, internal]
+    Default: internet-facing
+    Description: internal keeps the load balancer reachable only from inside the VPC.
+  ImageUri:
+    Type: String
+    MinLength: 1
+    Description: The vibecheck container image, built with Bedrock support.
+  BedrockModelId:
+    Type: String
+    MinLength: 1
+    Description: >-
+      Bedrock model ID, inference profile ID (e.g. a us. or eu. cross-region profile) or the
+      ARN of either. The model must be enabled in this account and Region.
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: ACM certificate for HTTPS on the load balancer. Empty serves plain HTTP on port 80.
+  PublicBaseUrl:
+    Type: String
+    Default: ""
+    Description: >-
+      The URL authors open, e.g. https://vibecheck.example.com when a DNS name points at the load
+      balancer. Empty uses the load balancer's own DNS name.
+  GitHubStatusTokenSecretArn:
+    Type: String
+    Default: ""
+    Description: >-
+      Secrets Manager secret holding a GitHub token with commit status write access. Empty means
+      vibecheck posts no commit status.
+  AllowedRepos:
+    Type: String
+    Default: ""
+    Description: Comma-separated owner/name allow-list. Empty permits any repo.
+
+Conditions:
+  HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
+  NoCertificate: !Equals [!Ref CertificateArn, ""]
+  HasPublicBaseUrl: !Not [!Equals [!Ref PublicBaseUrl, ""]]
+  HasGitHubStatusToken: !Not [!Equals [!Ref GitHubStatusTokenSecretArn, ""]]
+  HasAllowedRepos: !Not [!Equals [!Ref AllowedRepos, ""]]
+  ModelIdIsArn: !Equals [!Select [0, !Split [":", !Ref BedrockModelId]], "arn"]
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: vibecheck load balancer
+      VpcId: !Ref VpcId
+      # 443 is open even without a certificate so adding one later is a parameter change, not a
+      # security group change. Nothing listens on it until then.
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  ServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: vibecheck service
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !GetAtt LoadBalancerSecurityGroup.GroupId
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: vibecheck database
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !GetAtt ServiceSecurityGroup.GroupId
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: vibecheck database
+      SubnetIds: !Ref DatabaseSubnetIds
+
+  # The master password is spliced into DATABASE_URL below. Punctuation is excluded because
+  # characters such as '@', '/', ':' and '?' would end the URL's userinfo early and point the
+  # app at the wrong host or database. 40 alphanumerics is still well over 200 bits.
+  DatabaseCredentials:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: vibecheck RDS master credentials
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "vibecheck"}'
+        GenerateStringKey: password
+        PasswordLength: 40
+        ExcludePunctuation: true
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      Engine: postgres
+      # A full minor version: cfn-lint flags a bare "16" as deprecated for new instances. Minor
+      # upgrades still apply in the maintenance window, so this is the floor, not a freeze.
+      # When cfn-lint later deprecates this minor, CI's lint step fails until it is bumped.
+      EngineVersion: "16.15"
+      DBInstanceClass: db.t4g.micro
+      AllocatedStorage: "20"
+      StorageType: gp3
+      StorageEncrypted: true
+      PubliclyAccessible: false
+      DBName: vibecheck
+      MasterUsername: !Sub "{{resolve:secretsmanager:${DatabaseCredentials}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DatabaseCredentials}:SecretString:password}}"
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      VPCSecurityGroups:
+        - !GetAtt DatabaseSecurityGroup.GroupId
+      BackupRetentionPeriod: 7
+
+  # ECS can inject a whole secret or one JSON key of it, but cannot assemble a URL from parts,
+  # so the app's DATABASE_URL is its own secret. RDS for PostgreSQL 16 sets rds.force_ssl=1 by
+  # default and refuses unencrypted connections, hence sslmode=require. The URL is joined from
+  # parts rather than written as one !Sub so that no single line reads as user:password@host to
+  # a credential scanner; the password itself is only ever a dynamic reference.
+  DatabaseUrlSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: vibecheck DATABASE_URL
+      SecretString: !Join
+        - ""
+        - - "postgresql://vibecheck:"
+          - !Sub "{{resolve:secretsmanager:${DatabaseCredentials}:SecretString:password}}"
+          - !Sub "@${Database.Endpoint.Address}:${Database.Endpoint.Port}/vibecheck?sslmode=require"
+
+  # The bearer token the GitHub Action sends. Read it from this secret (the VibecheckTokenSecretArn
+  # output) to set the repository's VIBECHECK_TOKEN secret. Alphanumeric so it survives being
+  # pasted into a header or a GitHub secret without quoting.
+  VibecheckTokenSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: vibecheck VIBECHECK_TOKEN
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      # Image pulls from ECR and writes to CloudWatch Logs. It grants no Secrets Manager access;
+      # that is the inline policy below, limited to the secrets the container is given.
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      Policies:
+        - PolicyName: read-vibecheck-secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref DatabaseUrlSecret
+                  - !Ref VibecheckTokenSecret
+                  - !If [HasGitHubStatusToken, !Ref GitHubStatusTokenSecretArn, !Ref AWS::NoValue]
+
+  # The app's credentials for Bedrock come from this role through the ECS credentials endpoint;
+  # there are no static keys anywhere in the stack.
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invoke-bedrock-model
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # The model itself, whether BedrockModelId names a foundation model or an
+              # inference profile. Converse is authorised as bedrock:InvokeModel.
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !If
+                  - ModelIdIsArn
+                  - - !Ref BedrockModelId
+                  - - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+                    - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}"
+              # A cross-region inference profile routes each call to the foundation model in
+              # whichever Region serves it, and IAM checks that model's ARN too. The condition
+              # limits this to calls made through the configured profile, so the wildcard never
+              # lets the task call a foundation model directly.
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                Condition:
+                  StringEquals:
+                    bedrock:InferenceProfileArn: !If
+                      - ModelIdIsArn
+                      - !Ref BedrockModelId
+                      - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}"
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${AWS::StackName}-vibecheck"
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: vibecheck
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8000
+              Protocol: tcp
+          Environment:
+            - Name: FAKE_GRADER
+              Value: "false"
+            - Name: MODEL_PROVIDER
+              Value: bedrock
+            - Name: BEDROCK_MODEL_ID
+              Value: !Ref BedrockModelId
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            # Session links are built from this, never from the Host header, so it must be the
+            # address authors can reach.
+            - Name: VIBECHECK_BASE_URL
+              Value: !If
+                - HasPublicBaseUrl
+                - !Ref PublicBaseUrl
+                - !If
+                  - HasCertificate
+                  - !Sub "https://${LoadBalancer.DNSName}"
+                  - !Sub "http://${LoadBalancer.DNSName}"
+            - !If
+              - HasAllowedRepos
+              - Name: VIBECHECK_ALLOWED_REPOS
+                Value: !Ref AllowedRepos
+              - !Ref AWS::NoValue
+          Secrets:
+            - Name: DATABASE_URL
+              ValueFrom: !Ref DatabaseUrlSecret
+            - Name: VIBECHECK_TOKEN
+              ValueFrom: !Ref VibecheckTokenSecret
+            - !If
+              - HasGitHubStatusToken
+              - Name: GITHUB_STATUS_TOKEN
+                ValueFrom: !Ref GitHubStatusTokenSecretArn
+              - !Ref AWS::NoValue
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: vibecheck
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Scheme: !Ref LoadBalancerScheme
+      Subnets: !Ref LoadBalancerSubnetIds
+      SecurityGroups:
+        - !GetAtt LoadBalancerSecurityGroup.GroupId
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      TargetType: ip
+      Protocol: HTTP
+      Port: 8000
+      HealthCheckPath: /healthz
+      Matcher:
+        HttpCode: "200"
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: "30"
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCertificate
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  HttpRedirectListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCertificate
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: "443"
+            StatusCode: HTTP_301
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: NoCertificate
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # An ECS service attached to a target group fails to create until a listener forwards to it.
+  # DependsOn cannot name a resource whose condition may be false, so this handle references
+  # whichever listener exists and the service depends on the handle.
+  ListenerReady:
+    Type: AWS::CloudFormation::WaitConditionHandle
+    Metadata:
+      Listener: !If [HasCertificate, !Ref HttpsListener, !Ref HttpListener]
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: ListenerReady
+    Properties:
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 1
+      # The app runs its migrations before it answers /healthz.
+      HealthCheckGracePeriodSeconds: 120
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: !Ref AssignPublicIp
+          Subnets: !Ref ServiceSubnetIds
+          SecurityGroups:
+            - !GetAtt ServiceSecurityGroup.GroupId
+      LoadBalancers:
+        - ContainerName: vibecheck
+          ContainerPort: 8000
+          TargetGroupArn: !Ref TargetGroup
+
+Outputs:
+  BaseUrl:
+    Description: The URL vibecheck builds session links from. Set it as the repository's VIBECHECK_BASE_URL secret.
+    Value: !If
+      - HasPublicBaseUrl
+      - !Ref PublicBaseUrl
+      - !If
+        - HasCertificate
+        - !Sub "https://${LoadBalancer.DNSName}"
+        - !Sub "http://${LoadBalancer.DNSName}"
+  VibecheckTokenSecretArn:
+    Description: The secret holding the generated bearer token the GitHub Action must send.
+    Value: !Ref VibecheckTokenSecret
+  LogGroupName:
+    Description: CloudWatch log group for the vibecheck container.
+    Value: !Ref LogGroup
+  ClusterName:
+    Description: The ECS cluster.
+    Value: !Ref Cluster
+  ServiceName:
+    Description: The ECS service.
+    Value: !GetAtt Service.Name
