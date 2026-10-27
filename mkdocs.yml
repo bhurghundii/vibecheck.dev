@@ -45,6 +45,7 @@ nav:
       - Configuration: configuration.md
   - Running it:
       - Deploying to Railway: deploy-railway.md
+      - Deploying to AWS ECS: deploy-aws-ecs.md
       - Before you make it public: security.md
       - Local development: development.md
   - Limitations: limitations.md
