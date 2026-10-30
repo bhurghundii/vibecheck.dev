@@ -1,7 +1,8 @@
 name: release
 
-# Publishes the Docker image to GitHub Container Registry and creates the
-# GitHub Release when a version tag is pushed:
+# Publishes the Docker image to GitHub Container Registry, creates the GitHub
+# Release and updates the Homebrew formula when a version tag is pushed (bump
+# `version` in pyproject.toml to match first):
 #
 #   git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
 #
@@ -64,3 +65,55 @@ jobs:
           flags=(--generate-notes --verify-tag)
           case "$TAG" in *-*) flags+=(--prerelease) ;; esac
           gh release create "$TAG" "${flags[@]}"
+
+  # Points `brew install bhurghundii/tap/vibecheck` (the local CLI, app/cli.py)
+  # at this release by updating Formula/vibecheck.rb in the
+  # bhurghundii/homebrew-tap repo. That push needs a HOMEBREW_TAP_TOKEN secret:
+  # a fine-grained token with "Contents: write" on the tap repo only. Without
+  # it, or on a pre-release, the formula is only attached to the GitHub Release.
+  homebrew:
+    needs: image
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Render the formula
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          # The wheel's version comes from pyproject.toml, so `vibecheck --version`
+          # would lie if the tag moved on without it.
+          project_version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          if [ "$version" != "$project_version" ]; then
+            echo "::error title=version mismatch::Tag $TAG but pyproject.toml says $project_version. Bump it, then re-tag."
+            exit 1
+          fi
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/archive/refs/tags/$TAG.tar.gz" -o source.tar.gz
+          sha=$(sha256sum source.tar.gz | cut -d' ' -f1)
+          python3 scripts/brew_formula.py --version "$version" --sha256 "$sha" > vibecheck.rb
+
+      - name: Attach the formula to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" vibecheck.rb --clobber
+
+      - name: Push the formula to the tap
+        if: env.TAP_TOKEN != '' && !contains(github.ref_name, '-')
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/bhurghundii/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp vibecheck.rb tap/Formula/vibecheck.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/vibecheck.rb
+          if git diff --cached --quiet; then
+            echo "Formula already up to date."
+            exit 0
+          fi
+          git commit -m "vibecheck ${TAG#v}"
+          git push

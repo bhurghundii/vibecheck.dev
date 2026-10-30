@@ -44,6 +44,7 @@ Just to be clear, vibecheck does not review the code for you. **It just checks t
 - **Good development practices check.** Oversized PRs and diffs are rejected before any question is asked. _More coming soon._
 - **Local first.** Self-hosted only: one Docker Compose command and it's running, and it works in enterprise environments. BYOK of course.
 - **No GitHub App, no OAuth, no webhooks.** It's a FastAPI service that a GitHub Action talks to over a bearer token. Nothing to install on GitHub beyond a workflow file. Just keep the vibecheck token a secret.
+- **Quiz yourself locally.** `brew install bhurghundii/tap/vibecheck`, then run `vibecheck` in a repo (or `vibecheck --pr 123`) to get the same questions and grading in your terminal, with your own API key. Practice only, it doesn't touch the merge gate. See [Quiz yourself locally](https://bhurghundii.com/vibecheck.dev/local-cli/).
 - **Sarcastic mode.** Use vibecheck the way that God intended: a grumpy senior will brutally tear your understanding. I used to have a tech lead who did this. I miss them.
 
 ## Need a demo?
@@ -70,6 +71,7 @@ Full docs live at **https://bhurghundii.com/vibecheck.dev/** (source in [`docs/`
 - [Quickstart](https://bhurghundii.com/vibecheck.dev/quickstart/): self-host it with Docker Compose
 - [How it works](https://bhurghundii.com/vibecheck.dev/how-it-works/)
 - [Wire it into a repo](https://bhurghundii.com/vibecheck.dev/wire-it-up/) and [block PRs until they pass](https://bhurghundii.com/vibecheck.dev/blocking-prs/)
+- [Quiz yourself locally](https://bhurghundii.com/vibecheck.dev/local-cli/) with the `vibecheck` CLI
 - [Configuration](https://bhurghundii.com/vibecheck.dev/configuration/)
 - [Deploying to Railway](https://bhurghundii.com/vibecheck.dev/deploy-railway/) and the [pre-launch security checklist](https://bhurghundii.com/vibecheck.dev/security/)
 - [Local development](https://bhurghundii.com/vibecheck.dev/development/) and [limitations](https://bhurghundii.com/vibecheck.dev/limitations/)
