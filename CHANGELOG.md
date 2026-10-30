@@ -29,9 +29,10 @@
 - A local `vibecheck` command: the same walkthrough in your terminal, against
   your branch (`vibecheck`), a PR (`vibecheck --pr 123`) or a diff file, with
   your own `ANTHROPIC_API_KEY` and no server. Practice only; it stores nothing
-  and posts no status. Install with
-  `pipx install git+https://github.com/bhurghundii/vibecheck.dev`.
-
+  and posts no status. Install with `brew install bhurghundii/tap/vibecheck`
+  or `pipx install git+https://github.com/bhurghundii/vibecheck.dev`.
+- The release workflow regenerates the Homebrew formula on each tag and pushes
+  it to `bhurghundii/homebrew-tap` when `HOMEBREW_TAP_TOKEN` is set.
 - `EVALUATOR`, a JSON config of checks that reject a PR before grumpy asks
   anything. The first is `size`: more than 1000 changed lines (added +
   removed, outside lockfiles by default) and `POST /sessions` returns `422`
