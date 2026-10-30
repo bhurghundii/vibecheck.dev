@@ -41,7 +41,6 @@ nav:
       - How it works: how-it-works.md
   - Using vibecheck:
       - Wire it into a repo: wire-it-up.md
-      - Quiz yourself locally: local-cli.md
       - Blocking PRs: blocking-prs.md
       - Configuration: configuration.md
   - Running it:

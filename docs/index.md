@@ -12,6 +12,5 @@ vibecheck sits in your PR pipeline as a GitHub Action. Before a PR can merge, it
 - [How it works](how-it-works.md): what happens from PR open to verdict.
 - [Wire it into a repo](wire-it-up.md): add the GitHub Action.
 - [Blocking a PR](blocking-prs.md): make the verdict a required check.
-- [Quiz yourself locally](local-cli.md): `brew install` the CLI and practise on your own branch.
 - [Configuration](configuration.md): every environment variable.
 - [Before you make it public](security.md): the checklist for a public deployment.
