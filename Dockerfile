@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- builder ----
-FROM python:3.14-slim AS builder
+FROM python:3.15-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
@@ -31,7 +31,7 @@ COPY migrations ./migrations
 COPY assets ./assets
 
 # ---- runtime ----
-FROM python:3.14-slim AS runtime
+FROM python:3.15-slim AS runtime
 
 RUN groupadd --system vibecheck && useradd --system --gid vibecheck --home /app vibecheck
 
