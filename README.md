@@ -1,5 +1,24 @@
 # vibecheck - quizzes your team on their AI's code before it merges
 
+## Try it on your own code, no server needed
+
+The `vibecheck` CLI runs the same questions and grading in your terminal, against your own branch or any PR. All you need is an Anthropic API key.
+
+```sh
+brew install bhurghundii/tap/vibecheck
+export ANTHROPIC_API_KEY=sk-ant-...
+
+cd your-repo
+vibecheck            # this branch against main
+vibecheck --pr 123   # a GitHub PR (needs the gh CLI)
+```
+
+Not on Homebrew? `uv tool install git+https://github.com/bhurghundii/vibecheck.dev` works too. `vibecheck --fake` does a dry run with no API calls.
+
+Type your answer and finish it with an empty line. On the first line you can also type `:explain`, `:skip` or `:quit`. It's practice: nothing is stored and the PR's merge gate isn't touched. The [full guide](https://bhurghundii.com/vibecheck.dev/local-cli/) covers every option.
+
+## What is vibecheck?
+
 https://github.com/user-attachments/assets/497f427e-182e-4446-ac0c-ed6f1ad8ea28
 
 **vibecheck is a self-hosted merge gate for GitHub pull requests. Before a PR can merge, the person who opened it has to show they understand their own change.**
@@ -21,23 +40,6 @@ After that, when someone opens a pull request:
 
 This is still pretty early - just book a call with me here: https://calendly.com/bhurghundii/30min and I can sit down with you and we can talk about bringing it into your environment.
 Otherwise, you can contact the [core maintainer](https://github.com/bhurghundii) via the contacts and we can talk about it there.
-
-## Try it on your own code, no server needed
-
-The `vibecheck` CLI runs the same questions and grading in your terminal, against your own branch or any PR. All you need is an Anthropic API key.
-
-```sh
-brew install bhurghundii/tap/vibecheck
-export ANTHROPIC_API_KEY=sk-ant-...
-
-cd your-repo
-vibecheck            # this branch against main
-vibecheck --pr 123   # a GitHub PR (needs the gh CLI)
-```
-
-Not on Homebrew? `uv tool install git+https://github.com/bhurghundii/vibecheck.dev` works too. `vibecheck --fake` does a dry run with no API calls.
-
-Type your answer and finish it with an empty line. On the first line you can also type `:explain`, `:skip` or `:quit`. It's practice: nothing is stored and the PR's merge gate isn't touched. The [full guide](https://bhurghundii.com/vibecheck.dev/local-cli/) covers every option.
 
 ## Who is it for, and what do you get?
 
