@@ -13,9 +13,11 @@ brew install bhurghundii/tap/vibecheck
 Or with any Python 3.12+ tool installer:
 
 ```sh
-pipx install "git+https://github.com/bhurghundii/vibecheck.dev"
 uv tool install "git+https://github.com/bhurghundii/vibecheck.dev"
+pipx install "git+https://github.com/bhurghundii/vibecheck.dev"
 ```
+
+Update with `brew upgrade vibecheck` (or `uv tool upgrade vibecheck-dev`).
 
 Either way it only pulls in `httpx` and its small dependencies, none of the server's.
 
