@@ -2,7 +2,7 @@
 # vibecheck-dev, not vibecheck: that name is taken on PyPI. The command is
 # still `vibecheck`.
 name = "vibecheck-dev"
-version = "0.1.0"
+version = "0.2.0"
 description = "vibecheck — quizzes your team on their AI's code before it merges"
 readme = "README.md"
 license = "MIT"
