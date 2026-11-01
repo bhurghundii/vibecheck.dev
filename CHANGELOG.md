@@ -4,6 +4,11 @@
 
 **Changed**
 
+- The server's dependencies moved to a `server` dependency group so the
+  package itself only needs `httpx`. `uv sync` still installs everything; if
+  you build your own image, install with `uv sync --frozen --no-dev
+  --no-install-project` as the Dockerfile now does. The package is now named
+  `vibecheck-dev`.
 - Fork PRs are gated. The workflow now runs on `pull_request_target`
   instead of `pull_request`, so fork PRs get the secrets and are asked a
   question like any other PR; before, they were skipped. The diff comes
@@ -20,6 +25,12 @@
   remove it or switch it to `grumpy/verdict`.
 
 **Added**
+
+- A local `vibecheck` command: the same walkthrough in your terminal, against
+  your branch (`vibecheck`), a PR (`vibecheck --pr 123`) or a diff file, with
+  your own `ANTHROPIC_API_KEY` and no server. Practice only; it stores nothing
+  and posts no status. Install with
+  `pipx install git+https://github.com/bhurghundii/vibecheck.dev`.
 
 - `EVALUATOR`, a JSON config of checks that reject a PR before grumpy asks
   anything. The first is `size`: more than 1000 changed lines (added +

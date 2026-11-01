@@ -1,23 +1,36 @@
 [project]
-name = "vibecheck"
+# vibecheck-dev, not vibecheck: that name is taken on PyPI. The command is
+# still `vibecheck`.
+name = "vibecheck-dev"
 version = "0.1.0"
 description = "vibecheck — quizzes your team on their AI's code before it merges"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
+# Only what the local `vibecheck` CLI (app/cli.py) needs, so `pip install` and
+# the Homebrew formula stay small and pure-Python. Everything the server needs
+# is in the `server` dependency group below, which uv installs by default but
+# a published wheel never pulls in.
 dependencies = [
+    # Phase 1 §7's own convention: any code path that calls a model or an
+    # external HTTP service must be async httpx, never a sync SDK client.
+    # First actually used by app/ai/grading.py's RealGrader (phase 4); already
+    # a dev dependency since phase 2 for fastapi.testclient.TestClient.
+    "httpx>=0.28.1",
+]
+
+[project.scripts]
+vibecheck = "app.cli:main"
+
+[dependency-groups]
+server = [
     "fastapi>=0.159.1",
     "uvicorn[standard]>=0.54.0",
     "psycopg[binary,pool]>=3.3.6",
     "pydantic-settings>=2.16.1",
     "jinja2>=3.1.6",
     "python-multipart>=0.0.32",
-    # Phase 1 §7's own convention: any code path that calls a model or an
-    # external HTTP service must be async httpx, never a sync SDK client.
-    # First actually used by app/ai/grading.py's RealGrader (phase 4); already
-    # a dev dependency since phase 2 for fastapi.testclient.TestClient.
-    "httpx>=0.28.1",
     # app/web/rendering.py: markdown text (tutorial breakdowns, grading
     # reasoning) is rendered to HTML server-side and shown on the
     # unauthenticated /s/{token} page. `markdown` alone doesn't sanitize
@@ -28,8 +41,6 @@ dependencies = [
     "markdown>=3.11.2",
     "nh3>=0.3.7",
 ]
-
-[dependency-groups]
 dev = [
     "pytest>=9.1.1",
     "testcontainers[postgres]>=4.15.0",
@@ -40,7 +51,22 @@ docs = [
 ]
 
 [tool.uv]
-package = false
+# `uv sync` / `uv run` install the server and dev tooling by default; the
+# Dockerfile asks for the server group only.
+default-groups = ["dev", "server"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+# Recorded model responses for `make eval`; dev-only and not small.
+exclude = ["app/ai/evals"]
+
+[tool.hatch.build.targets.sdist]
+include = ["app", "LICENSE", "README.md"]
+exclude = ["app/ai/evals"]
 
 [tool.ruff]
 # 100, not the default 88: this codebase carries unusually long explanatory

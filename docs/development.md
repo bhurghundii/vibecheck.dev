@@ -6,6 +6,7 @@ make test   # uv run pytest (spins up its own Postgres via Testcontainers)
 make seed   # inserts a realistic session directly into Postgres, prints its URL
 make eval   # runs app/ai/evals/cases/ against the real grader (needs MODEL_API_KEY the first time)
 make down   # docker compose down
+uv run vibecheck --fake   # the local CLI (app/cli.py) against this branch, no model calls
 ```
 
 !!! note
@@ -16,3 +17,5 @@ Migrations (`migrations/*.sql`) apply automatically on startup via a small built
 ## Tech stack
 
 Python, FastAPI, `uv`, psycopg3 (async, raw SQL, no ORM), Postgres 16, server-rendered Jinja2 templates. The only client-side JavaScript is a small paste guard on the answer box (`app/web/static/nopaste.js`); every page works without it. Grading calls the Anthropic Messages API directly over async httpx. See `pyproject.toml` for exact versions.
+
+The project's own dependencies are only what the local CLI needs (`httpx`); the server's are in the `server` dependency group, which `uv sync` installs by default. So `app/cli.py` and what it imports (`app/ai/grading.py`, `app/evaluator.py`) must not import the server's packages at module level. `tests/test_cli.py` checks this.

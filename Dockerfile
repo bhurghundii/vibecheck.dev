@@ -24,7 +24,10 @@ COPY pyproject.toml uv.lock ./
 # build with plain `docker build`/`docker compose` elsewhere. Losing the
 # cache just means uv re-populates its package cache each build — slower,
 # not broken.
-RUN uv sync --frozen --no-dev
+# --no-install-project: the source isn't copied yet, and the server runs it
+# straight from /app anyway. The project itself is only installed as a package
+# for the local `vibecheck` CLI. --no-dev keeps the default `server` group.
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY app ./app
 COPY migrations ./migrations
