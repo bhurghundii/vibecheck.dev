@@ -93,6 +93,7 @@ Full docs live at **https://bhurghundii.com/vibecheck.dev/** (source in [`docs/`
 - [Quiz yourself locally](https://bhurghundii.com/vibecheck.dev/local-cli/) with the `vibecheck` CLI
 - [Configuration](https://bhurghundii.com/vibecheck.dev/configuration/)
 - [Deploying to Railway](https://bhurghundii.com/vibecheck.dev/deploy-railway/) and the [pre-launch security checklist](https://bhurghundii.com/vibecheck.dev/security/)
+- [Deploying to AWS ECS](https://bhurghundii.com/vibecheck.dev/deploy-aws-ecs/): Fargate, RDS and Claude on Bedrock from one CloudFormation template. Anthropic models on Bedrock need a one-time use-case form in your AWS account first
 - [Local development](https://bhurghundii.com/vibecheck.dev/development/) and [limitations](https://bhurghundii.com/vibecheck.dev/limitations/)
 
 ## License
