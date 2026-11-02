@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- builder ----
-FROM python:3.14-slim AS builder
+FROM python:3.15-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
@@ -24,14 +24,17 @@ COPY pyproject.toml uv.lock ./
 # build with plain `docker build`/`docker compose` elsewhere. Losing the
 # cache just means uv re-populates its package cache each build — slower,
 # not broken.
-RUN uv sync --frozen --no-dev
+# --no-install-project: the source isn't copied yet, and the server runs it
+# straight from /app anyway. The project itself is only installed as a package
+# for the local `vibecheck` CLI. --no-dev keeps the default `server` group.
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY app ./app
 COPY migrations ./migrations
 COPY assets ./assets
 
 # ---- runtime ----
-FROM python:3.14-slim AS runtime
+FROM python:3.15-slim AS runtime
 
 RUN groupadd --system vibecheck && useradd --system --gid vibecheck --home /app vibecheck
 

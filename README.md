@@ -1,5 +1,24 @@
 # vibecheck - quizzes your team on their AI's code before it merges
 
+## Try it on your own code, no server needed
+
+The `vibecheck` CLI runs the same questions and grading in your terminal, against your own branch or any PR. All you need is an Anthropic API key.
+
+```sh
+brew install bhurghundii/tap/vibecheck
+export ANTHROPIC_API_KEY=sk-ant-...
+
+cd your-repo
+vibecheck            # this branch against main
+vibecheck --pr 123   # a GitHub PR (needs the gh CLI)
+```
+
+Not on Homebrew? `uv tool install git+https://github.com/bhurghundii/vibecheck.dev` works too. `vibecheck --fake` does a dry run with no API calls.
+
+Type your answer and finish it with an empty line. On the first line you can also type `:explain`, `:skip` or `:quit`. It's practice: nothing is stored and the PR's merge gate isn't touched. The [full guide](https://bhurghundii.com/vibecheck.dev/local-cli/) covers every option.
+
+## What is vibecheck?
+
 https://github.com/user-attachments/assets/497f427e-182e-4446-ac0c-ed6f1ad8ea28
 
 **vibecheck is a self-hosted merge gate for GitHub pull requests. Before a PR can merge, the person who opened it has to show they understand their own change.**
@@ -16,6 +35,11 @@ After that, when someone opens a pull request:
 2. The author gets the link and answers them in plain English. They get one question at a time about different parts of their code. However, the first question is always *"How does this change work on a high level?"*
 3. An AI grader marks each answer against the actual change. You can tune how much detail warrants a pass here.
 4. If the author passes the test, they demonstrate the minimum understanding of their work. The check goes green and the PR can merge. If not, the merge stays blocked. 
+
+## I want this! How can I get this?
+
+This is still pretty early - just book a call with me here: https://calendly.com/bhurghundii/30min and I can sit down with you and we can talk about bringing it into your environment.
+Otherwise, you can contact the [core maintainer](https://github.com/bhurghundii) via the contacts and we can talk about it there.
 
 ## Who is it for, and what do you get?
 
@@ -39,6 +63,7 @@ Just to be clear, vibecheck does not review the code for you. **It just checks t
 - **Good development practices check.** Oversized PRs and diffs are rejected before any question is asked. _More coming soon._
 - **Local first.** Self-hosted only: one Docker Compose command and it's running, and it works in enterprise environments. BYOK of course.
 - **No GitHub App, no OAuth, no webhooks.** It's a FastAPI service that a GitHub Action talks to over a bearer token. Nothing to install on GitHub beyond a workflow file. Just keep the vibecheck token a secret.
+- **Quiz yourself locally.** `brew install bhurghundii/tap/vibecheck`, then run `vibecheck` in a repo (or `vibecheck --pr 123`) to get the same questions and grading in your terminal, with your own API key. Practice only, it doesn't touch the merge gate. See [Quiz yourself locally](https://bhurghundii.com/vibecheck.dev/local-cli/).
 - **Sarcastic mode.** Use vibecheck the way that God intended: a grumpy senior will brutally tear your understanding. I used to have a tech lead who did this. I miss them.
 
 ## Need a demo?
@@ -65,6 +90,7 @@ Full docs live at **https://bhurghundii.com/vibecheck.dev/** (source in [`docs/`
 - [Quickstart](https://bhurghundii.com/vibecheck.dev/quickstart/): self-host it with Docker Compose
 - [How it works](https://bhurghundii.com/vibecheck.dev/how-it-works/)
 - [Wire it into a repo](https://bhurghundii.com/vibecheck.dev/wire-it-up/) and [block PRs until they pass](https://bhurghundii.com/vibecheck.dev/blocking-prs/)
+- [Quiz yourself locally](https://bhurghundii.com/vibecheck.dev/local-cli/) with the `vibecheck` CLI
 - [Configuration](https://bhurghundii.com/vibecheck.dev/configuration/)
 - [Deploying to Railway](https://bhurghundii.com/vibecheck.dev/deploy-railway/) and the [pre-launch security checklist](https://bhurghundii.com/vibecheck.dev/security/)
 - [Local development](https://bhurghundii.com/vibecheck.dev/development/) and [limitations](https://bhurghundii.com/vibecheck.dev/limitations/)

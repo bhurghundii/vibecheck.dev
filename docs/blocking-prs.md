@@ -32,7 +32,7 @@ In the repo (Settings -> Secrets and variables -> Actions, or `gh secret set`), 
 
 ## 3. Open a PR and check the status appears
 
-Open a PR from a branch in the same repo (fork PRs do not get secrets). Within a minute or so:
+Open a PR (from a branch or a fork). Within a minute or so:
 
 - the `grill` job passes and comments a question link;
 - the PR shows `vibecheck/verdict` as **pending** with "Waiting for the PR author to answer".
@@ -80,7 +80,7 @@ Pushing a new commit also creates a fresh session, as before. Because restarts a
 
 | Symptom | Likely cause |
 |---|---|
-| `grill` warns that secrets are not set | `VIBECHECK_BASE_URL` or `VIBECHECK_TOKEN` missing in the repo, or the PR is from a fork |
+| `grill` warns that secrets are not set | `VIBECHECK_BASE_URL` or `VIBECHECK_TOKEN` missing in the repo |
 | `grill` passes but there is no question comment | The server returned an error; the job log has the response |
 | Question comment appears but no `vibecheck/verdict` | `GITHUB_STATUS_TOKEN` unset on the server (look for the `disabled` startup line) |
 | Server log: GitHub rejected the commit status, 401 | The token is wrong, expired or revoked, or has stray quotes or spaces; create a new one and redeploy |

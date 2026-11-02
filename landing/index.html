@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vibecheck - quizzes your team on their AI's code before it merges</title>
+<meta name="description" content="A self-hosted merge gate for GitHub pull requests. Before a PR can merge, the person who opened it has to show they understand their own change.">
+<meta property="og:title" content="vibecheck">
+<meta property="og:description" content="Quizzes your team on their AI's code before it merges. A self-hosted merge gate for GitHub pull requests.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#0f0d0c" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#faf7f2" media="(prefers-color-scheme: light)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ff5a1f'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' stroke='%23fff' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #faf7f2;
+    --bg-alt: #f3eee6;
+    --surface: #ffffff;
+    --text: #1c1917;
+    --muted: #6b635b;
+    --line: #e5ddd2;
+    --accent: #e8470f;
+    --accent-ink: #ffffff;
+    --accent-soft: #fde6dc;
+    --pass: #1a7f37;
+    --fail: #c4291c;
+    --code-bg: #f6f3ee;
+    --add-bg: #e6f4ea;
+    --add: #1a7f37;
+    --del-bg: #fbe7e5;
+    --del: #b3261e;
+    --shadow: 0 1px 2px rgba(28, 25, 23, .06), 0 12px 40px -12px rgba(28, 25, 23, .18);
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --display: "Space Grotesk", var(--sans);
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f0d0c;
+      --bg-alt: #161311;
+      --surface: #1b1816;
+      --text: #f2ede7;
+      --muted: #a39a90;
+      --line: #2e2925;
+      --accent: #ff6a33;
+      --accent-ink: #1a0b04;
+      --accent-soft: #3a1c10;
+      --pass: #4ac26b;
+      --fail: #ff7b72;
+      --code-bg: #141110;
+      --add-bg: rgba(46, 160, 67, .16);
+      --add: #6fdd8b;
+      --del-bg: rgba(248, 81, 73, .14);
+      --del: #ff9b94;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 20px 50px -20px rgba(0, 0, 0, .8);
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    overflow-x: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font: 400 17px/1.6 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  code, pre { font-family: var(--mono); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  @media (max-width: 600px) { .wrap { padding: 0 16px; } }
+
+  /* Nav */
+  header.nav {
+    position: sticky; top: 0; z-index: 10;
+    background: color-mix(in srgb, var(--bg) 85%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  header.nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; font: 700 19px var(--display); text-decoration: none; letter-spacing: -.01em; }
+  .brand-mark { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; }
+  .brand-mark svg { width: 16px; height: 16px; }
+  .nav-links { display: flex; gap: 28px; font-size: 15px; color: var(--muted); }
+  .nav-links a { text-decoration: none; }
+  .nav-links a:hover { color: var(--text); }
+  @media (max-width: 760px) { .nav-links .hide-sm { display: none; } .nav-links { gap: 18px; } }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 20px; border-radius: 10px;
+    font: 600 15px var(--sans); text-decoration: none;
+    border: 1px solid var(--line); background: var(--surface); color: var(--text);
+    transition: transform .15s ease, border-color .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); border-color: var(--muted); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn-primary:hover { border-color: var(--accent); filter: brightness(1.05); }
+
+  /* Hero */
+  .hero { padding: 72px 0 88px; }
+  .hero .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 56px; align-items: center; }
+  @media (max-width: 960px) { .hero .wrap { grid-template-columns: minmax(0, 1fr); gap: 44px; } .hero { padding: 48px 0 64px; } }
+  .eyebrow {
+    display: inline-block; font: 500 13px var(--mono); color: var(--accent);
+    background: var(--accent-soft); padding: 5px 10px; border-radius: 6px; margin-bottom: 22px;
+  }
+  h1 {
+    font: 700 clamp(40px, 6vw, 62px)/1.04 var(--display);
+    letter-spacing: -.03em; margin: 0 0 22px;
+  }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lede { font-size: 19px; color: var(--muted); margin: 0 0 32px; max-width: 34em; }
+  .lede strong { color: var(--text); font-weight: 600; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 28px 0 0; padding: 0; list-style: none; font: 400 13px var(--mono); color: var(--muted); }
+  .facts li::before { content: "+ "; color: var(--accent); }
+
+  /* Mock exam window */
+  .window {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: var(--shadow); overflow: hidden; min-width: 0;
+  }
+  .window-bar {
+    display: flex; align-items: center; gap: 12px; padding: 11px 14px;
+    border-bottom: 1px solid var(--line); background: var(--bg-alt);
+  }
+  .dots { display: flex; gap: 6px; }
+  .dots span { width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
+  .url { flex: 1; font: 400 12px var(--mono); color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .window-body { padding: 22px 22px 20px; }
+  .exam-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .exam-head .repo { font-family: var(--mono); }
+  .exam-q { font: 600 18px/1.4 var(--display); margin: 0 0 14px; letter-spacing: -.01em; }
+  .slice-cap { font: 400 12px var(--mono); color: var(--muted); margin: 0 0 6px; }
+  pre.slice {
+    margin: 0 0 16px; padding: 10px 0; background: var(--code-bg);
+    border: 1px solid var(--line); border-radius: 8px;
+    font-size: 12.5px; line-height: 1.65; overflow-x: auto;
+  }
+  pre.slice > span { display: block; padding: 0 14px; white-space: pre; }
+  pre.slice .g { color: var(--muted); opacity: .6; user-select: none; margin-right: 10px; }
+  pre.slice .add { background: var(--add-bg); color: var(--add); }
+  pre.slice .del { background: var(--del-bg); color: var(--del); }
+  .answer {
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+    font-size: 15px; background: var(--bg); margin-bottom: 14px;
+  }
+  .answer::after { content: ""; display: inline-block; width: 2px; height: 1.05em; background: var(--text); vertical-align: -2px; margin-left: 2px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .verdict { border-left: 3px solid var(--fail); background: var(--bg-alt); border-radius: 0 8px 8px 0; padding: 10px 14px; font-size: 14.5px; }
+  .verdict-label { font-weight: 600; color: var(--fail); margin-right: 4px; }
+  .verdict [data-tone] { display: none; }
+  .window[data-mode="sarcastic"] .verdict [data-tone="sarcastic"],
+  .window[data-mode="professional"] .verdict [data-tone="professional"] { display: inline; }
+  .exam-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; font-size: 13px; color: var(--muted); }
+  .toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; padding: 2px; background: var(--bg); }
+  .toggle button {
+    border: 0; background: transparent; color: var(--muted); font: 500 12.5px var(--sans);
+    padding: 5px 10px; border-radius: 6px; cursor: pointer;
+  }
+  .toggle button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+  .check {
+    display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+    border-top: 1px solid var(--line); background: var(--bg-alt); font-size: 13.5px;
+  }
+  .check .ring { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #d4a72c; flex: none; }
+  .check code { font-size: 13px; font-weight: 500; }
+  .check .msg { color: var(--muted); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge { font: 500 11px var(--sans); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; color: var(--muted); }
+
+  /* Sections */
+  section { padding: 88px 0; }
+  section.alt { background: var(--bg-alt); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  @media (max-width: 600px) { section { padding: 64px 0; } }
+  .kicker { font: 500 13px var(--mono); color: var(--accent); margin: 0 0 12px; text-transform: lowercase; }
+  h2 { font: 700 clamp(30px, 4vw, 42px)/1.12 var(--display); letter-spacing: -.025em; margin: 0 0 16px; max-width: 22em; }
+  .section-lede { color: var(--muted); font-size: 18px; max-width: 40em; margin: 0 0 48px; }
+
+  /* Problem */
+  .problem { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: center; }
+  @media (max-width: 860px) { .problem { grid-template-columns: minmax(0, 1fr); gap: 32px; } }
+  .problem p { color: var(--muted); margin: 0 0 16px; }
+  .problem p strong { color: var(--text); }
+  .lgtm {
+    font: 700 clamp(44px, 7vw, 76px)/1 var(--display); letter-spacing: -.03em;
+    color: var(--text); margin: 0;
+  }
+  .lgtm span { display: block; color: var(--muted); font-size: .42em; letter-spacing: -.01em; margin-top: 14px; font-weight: 500; }
+  .lgtm s { text-decoration-color: var(--accent); text-decoration-thickness: 5px; }
+
+  /* Steps */
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; counter-reset: step; padding: 0; margin: 0; list-style: none; }
+  @media (max-width: 960px) { .steps { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .steps { grid-template-columns: 1fr; } }
+  .steps li { counter-increment: step; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px; }
+  .steps li::before { content: "0" counter(step); display: block; font: 500 13px var(--mono); color: var(--accent); margin-bottom: 14px; }
+  .steps h3 { font: 600 19px/1.3 var(--display); margin: 0 0 8px; letter-spacing: -.01em; }
+  .steps p { margin: 0; color: var(--muted); font-size: 15.5px; }
+
+  /* Features */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  @media (max-width: 960px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+  .grid > div { background: var(--surface); padding: 28px; }
+  .grid h3 { font: 600 18px/1.3 var(--display); margin: 0 0 8px; letter-spacing: -.01em; }
+  .grid p { margin: 0; color: var(--muted); font-size: 15.5px; }
+  .grid code { font-size: .88em; background: var(--code-bg); border: 1px solid var(--line); padding: 1px 5px; border-radius: 4px; }
+
+  /* Audience */
+  .audience { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+  @media (max-width: 760px) { .audience { grid-template-columns: 1fr; } }
+  .audience > div { border: 1px solid var(--line); border-radius: 14px; padding: 26px; background: var(--surface); }
+  .audience h3 { font: 600 19px var(--display); margin: 0 0 8px; }
+  .audience p { margin: 0; color: var(--muted); font-size: 15.5px; }
+
+  /* Demos */
+  .demos { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 760px) { .demos { grid-template-columns: 1fr; } }
+  .demo {
+    display: block; text-decoration: none; border: 1px solid var(--line); border-radius: 14px;
+    padding: 26px; background: var(--surface); transition: transform .15s ease, border-color .15s ease;
+  }
+  .demo:hover { transform: translateY(-2px); border-color: var(--muted); }
+  .demo .status { display: inline-flex; align-items: center; gap: 8px; font: 500 13px var(--mono); margin-bottom: 14px; }
+  .demo .status i { width: 10px; height: 10px; border-radius: 50%; }
+  .demo.pass .status { color: var(--pass); } .demo.pass .status i { background: var(--pass); }
+  .demo.fail .status { color: var(--fail); } .demo.fail .status i { background: var(--fail); }
+  .demo h3 { font: 600 20px var(--display); margin: 0 0 6px; }
+  .demo p { margin: 0; color: var(--muted); font-size: 15.5px; }
+  .demo .go { display: inline-block; margin-top: 16px; font-weight: 600; font-size: 15px; }
+
+  /* Quickstart */
+  .qs { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 48px; align-items: start; }
+  @media (max-width: 900px) { .qs { grid-template-columns: minmax(0, 1fr); gap: 28px; } }
+  .qs ul { margin: 0 0 28px; padding: 0; list-style: none; }
+  .qs li { padding: 10px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 15.5px; }
+  .qs li strong { color: var(--text); font-weight: 600; }
+  pre.term {
+    margin: 0; background: #14110f; color: #e9e3dc; border-radius: 14px; padding: 22px 24px;
+    font-size: 13.5px; line-height: 1.75; overflow-x: auto; border: 1px solid var(--line); box-shadow: var(--shadow);
+  }
+  pre.term .c { color: #8a8077; }
+  pre.term .p { color: #ff7a45; user-select: none; }
+  pre.term .o { color: #6fdd8b; }
+
+  /* Closing CTA */
+  .closing { text-align: center; }
+  .closing h2 { margin-left: auto; margin-right: auto; }
+  .closing .section-lede { margin-left: auto; margin-right: auto; margin-bottom: 32px; }
+  .closing .cta-row { justify-content: center; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px 32px; flex-wrap: wrap; }
+  footer nav { display: flex; gap: 20px; flex-wrap: wrap; }
+  footer a { text-decoration: none; } footer a:hover { color: var(--text); }
+  footer .dedication { flex-basis: 100%; font-style: italic; font-size: 13px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .answer::after { animation: none; }
+    .btn, .demo { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="vibecheck home">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3L12.5 5" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      vibecheck
+    </a>
+    <nav class="nav-links">
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#features">Features</a>
+      <a href="https://bhurghundii.com/vibecheck.dev/">Docs</a>
+      <a href="https://github.com/bhurghundii/vibecheck.dev">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <div class="hero">
+    <div class="wrap">
+      <div>
+        <span class="eyebrow">self-hosted merge gate for GitHub PRs</span>
+        <h1>Quizzes your team on their <em>AI's code</em> before it merges.</h1>
+        <p class="lede">Before a PR can merge, the person who opened it has to show they understand their own change. <strong>vibecheck does not review the code for you. It checks that the author can.</strong></p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://calendly.com/bhurghundii/30min">Book a call</a>
+          <a class="btn" href="https://bhurghundii.com/vibecheck.dev/quickstart/">Read the quickstart</a>
+        </div>
+        <ul class="facts">
+          <li>MIT licensed</li>
+          <li>Docker + Postgres</li>
+          <li>BYOK Anthropic Claude</li>
+          <li>No GitHub App</li>
+        </ul>
+      </div>
+
+      <div class="window" id="demo" data-mode="sarcastic">
+        <div class="window-bar">
+          <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="url">your-vibecheck.internal/s/9f3c...e1a/q/2</div>
+        </div>
+        <div class="window-body">
+          <div class="exam-head"><span class="repo">acme/payments #1482</span><span>Question 2 of 4</span></div>
+          <p class="exam-q">Why does this loop stop retrying on a 4xx response, and what happens to that response afterwards?</p>
+          <p class="slice-cap">app/github/commit_status.py - lines 41-48</p>
+<pre class="slice" aria-label="Diff excerpt"><span><span class="g">41</span>async def post_status(sha, state):</span><span class="del"><span class="g">42</span>    resp = await client.post(url, json=body)</span><span class="add"><span class="g">43</span>    for attempt in range(3):</span><span class="add"><span class="g">44</span>        resp = await client.post(url, json=body)</span><span class="add"><span class="g">45</span>        if resp.status_code &lt; 500:</span><span class="add"><span class="g">46</span>            break</span><span class="add"><span class="g">47</span>        await asyncio.sleep(2 ** attempt)</span><span><span class="g">48</span>    resp.raise_for_status()</span></pre>
+          <div class="answer">it retries the request so it works better</div>
+          <div class="verdict" aria-live="polite">
+            <span class="verdict-label">Not quite:</span>
+            <span data-tone="sarcastic">"So it works better." Bold. Anything under 500 breaks out on the first try and goes straight into <code>raise_for_status()</code>. Retrying a 403 three times was never going to fix your token.</span>
+            <span data-tone="professional">The loop only retries 5xx responses. A 4xx breaks out on the first attempt and <code>raise_for_status()</code> raises it, since retrying a client error would not change the outcome.</span>
+          </div>
+          <div class="exam-foot">
+            <span>Attempt 1 of 3</span>
+            <div class="toggle" role="group" aria-label="Grader tone">
+              <button type="button" data-set="professional" aria-pressed="false">Professional</button>
+              <button type="button" data-set="sarcastic" aria-pressed="true">Sarcastic mode</button>
+            </div>
+          </div>
+        </div>
+        <div class="check">
+          <span class="ring" aria-hidden="true"></span>
+          <code>vibecheck/verdict</code>
+          <span class="msg">Waiting for the author to pass</span>
+          <span class="badge">Required</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="alt">
+    <div class="wrap problem">
+      <p class="lgtm"><s>"LGTM, CI is green."</s><span>The most expensive sentence in software.</span></p>
+      <div>
+        <p class="kicker">// the problem</p>
+        <p>Thanks to AI, it is far easier to generate code that nobody understands. The burden of understanding falls on the reviewers, and when they face a pile of massive PRs nobody has the energy to read closely, the result is burnout and rubber-stamping.</p>
+        <p>Then you are shipping code that nobody understands. <strong>For business critical software, that is simply unacceptable.</strong></p>
+        <p>vibecheck keeps a human in the loop who knows what the change does, before a reviewer spends an hour on it.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <p class="kicker">// how it works</p>
+      <h2>One workflow file. One link on the PR. No understanding, no merge.</h2>
+      <p class="section-lede">Run vibecheck on your own server and add a single GitHub Actions workflow to your repo. From then on, every pull request gets an exam sheet.</p>
+      <ol class="steps">
+        <li><h3>It reads the change</h3><p>vibecheck reads the diff, forms its own blind interpretation, writes a few questions, and comments on the PR with a link.</p></li>
+        <li><h3>The author answers</h3><p>One question per screen, next to the slice of the diff it is about, in plain English. The first is always: how does this change work at a high level?</p></li>
+        <li><h3>Claude grades it</h3><p>Each answer is marked against the actual change. Terse but correct passes. Contradicting the diff fails. You tune how much detail a pass needs.</p></li>
+        <li><h3>The check decides</h3><p>Pass enough questions and <code>vibecheck/verdict</code> goes green. Fall short and the merge stays blocked.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="features" class="alt">
+    <div class="wrap">
+      <p class="kicker">// features</p>
+      <h2>Built to be annoying in exactly one way.</h2>
+      <p class="section-lede">Everything else stays out of your way: no app to install, no OAuth dance, no runner sitting idle while someone thinks.</p>
+      <div class="grid">
+        <div><h3>An exam sheet for every PR</h3><p>A fixed high-level question plus scoped questions, each anchored to a specific part of the diff.</p></div>
+        <div><h3>Sized to the change</h3><p>One scoped question per 15 changed lines, up to a cap. A one-line PR gets one question. A 1,000-line monstrosity gets picked apart.</p></div>
+        <div><h3>Graded leniently</h3><p>Wrong answers can be retried, then the answer is revealed. "Explain it for me" walks through a section with no effect on the mark.</p></div>
+        <div><h3>A real merge gate</h3><p>Require <code>vibecheck/verdict</code> in branch protection and the PR cannot merge until the author passes. Leave it optional for advisory mode.</p></div>
+        <div><h3>Good practice checks</h3><p>Oversized PRs and diffs are rejected before a single question is asked, with the reason commented on the PR.</p></div>
+        <div><h3>Local first</h3><p>Self-hosted only. One Docker Compose command and it is running, enterprise network included. Bring your own Anthropic key.</p></div>
+        <div><h3>No GitHub App, no webhooks</h3><p>A FastAPI service that a GitHub Action talks to over a bearer token. Nothing to install on GitHub beyond a workflow file.</p></div>
+        <div><h3>Fork PRs covered</h3><p>Drive-by PRs from forks are gated too, without ever checking out or running their code.</p></div>
+        <div><h3>Sarcastic mode</h3><p>Use vibecheck the way God intended: a grumpy senior who brutally tears apart your understanding. Off by default.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <p class="kicker">// who it is for</p>
+      <h2>Anyone who has to live with the code after it merges.</h2>
+      <p class="section-lede">Use AI to deliver quality. vibecheck makes sure someone still knows what it does.</p>
+      <div class="audience">
+        <div><h3>Reviewers and maintainers</h3><p>Tired of massive PRs from people who cannot explain them? Every author gets checked on the basics before you spend an hour reading.</p></div>
+        <div><h3>Engineering teams and leads</h3><p>Confidence that your team understands every change they ship, even when AI wrote most of it.</p></div>
+        <div><h3>Open source projects</h3><p>A cheap filter for drive-by, AI-generated pull requests that nobody has actually read.</p></div>
+        <div><h3>Authors</h3><p>Unsure what your AI actually did for you? Get your understanding checked before someone else does.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="alt">
+    <div class="wrap">
+      <p class="kicker">// see it on real PRs</p>
+      <h2>Watch it pass. Watch it fail.</h2>
+      <p class="section-lede">vibecheck gates its own repository. These are real pull requests with the verdict attached.</p>
+      <div class="demos">
+        <a class="demo pass" href="https://github.com/bhurghundii/vibecheck.dev/pull/53">
+          <span class="status"><i></i>vibecheck/verdict: success</span>
+          <h3>Demo 1: pass a PR</h3>
+          <p>The author answers well, the verdict goes green, and the merge button unlocks.</p>
+          <span class="go">Open PR #53</span>
+        </a>
+        <a class="demo fail" href="https://github.com/bhurghundii/vibecheck.dev/pull/54">
+          <span class="status"><i></i>vibecheck/verdict: failure</span>
+          <h3>Demo 2: fail a PR</h3>
+          <p>The author answers badly, and the merge stays blocked.</p>
+          <span class="go">Open PR #54</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section id="quickstart">
+    <div class="wrap qs">
+      <div>
+        <p class="kicker">// quickstart</p>
+        <h2>Running locally in about a minute.</h2>
+        <ul>
+          <li><strong>Self-hosted.</strong> A Docker image on <code>ghcr.io/bhurghundii/vibecheck.dev</code> plus a Postgres database, on your server or cloud account.</li>
+          <li><strong>Free to try.</strong> The fake grader is on by default, so you can see the whole flow with zero API cost.</li>
+          <li><strong>Then wire it up.</strong> Add the workflow, set two repo secrets, and require the check.</li>
+        </ul>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://bhurghundii.com/vibecheck.dev/quickstart/">Full quickstart</a>
+          <a class="btn" href="https://bhurghundii.com/vibecheck.dev/wire-it-up/">Wire it into a repo</a>
+        </div>
+      </div>
+<pre class="term" aria-label="Quickstart commands"><span class="p">$ </span>git clone https://github.com/bhurghundii/vibecheck.dev.git
+<span class="p">$ </span>cd vibecheck.dev
+<span class="p">$ </span>cp .env.example .env
+<span class="c"># set VIBECHECK_TOKEN and VIBECHECK_BASE_URL</span>
+<span class="p">$ </span>docker compose up --build
+<span class="p">$ </span>curl localhost:8000/healthz
+<span class="o">{"status": "ok"}</span>
+<span class="p">$ </span>make seed
+<span class="c"># prints a session URL: open it and take the exam</span></pre>
+    </div>
+  </section>
+
+  <section class="alt closing">
+    <div class="wrap">
+      <p class="kicker">// get it</p>
+      <h2>Want this in front of your PRs?</h2>
+      <p class="section-lede">It is still early. Book a call and we will sit down and talk about bringing vibecheck into your environment.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://calendly.com/bhurghundii/30min">Book a 30 minute call</a>
+        <a class="btn" href="https://github.com/bhurghundii">Contact the maintainer</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>vibecheck is MIT licensed.</span>
+    <nav>
+      <a href="https://bhurghundii.com/vibecheck.dev/">Docs</a>
+      <a href="https://github.com/bhurghundii/vibecheck.dev">GitHub</a>
+      <a href="https://github.com/bhurghundii/vibecheck.dev/blob/main/SECURITY.md">Security</a>
+      <a href="https://github.com/bhurghundii/vibecheck.dev/blob/main/CHANGELOG.md">Changelog</a>
+    </nav>
+    <p class="dedication">I heard you liked vibe slop, so I made vibe slop for your vibe slop.</p>
+  </div>
+</footer>
+
+<script>
+  // Grader tone toggle on the hero mock.
+  (function () {
+    var win = document.getElementById("demo");
+    var buttons = win.querySelectorAll(".toggle button");
+    buttons.forEach(function (b) {
+      b.addEventListener("click", function () {
+        win.dataset.mode = b.dataset.set;
+        buttons.forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
+      });
+    });
+  })();
+</script>
+</body>
+</html>

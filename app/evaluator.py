@@ -10,8 +10,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from fnmatch import fnmatch
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING
 
-from app.config import Settings
+# Type-only: the local CLI (app/cli.py) runs these checks without the server's
+# pydantic-settings installed, passing its own object with the same attributes.
+if TYPE_CHECKING:
+    from app.config import Settings
 
 _GIT_HEADER = "diff --git "
 

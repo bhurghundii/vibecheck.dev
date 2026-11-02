@@ -23,8 +23,10 @@ name: vibecheck
 #
 # Runs on a GitHub-hosted runner — vibecheck is hosted publicly (see the
 # VIBECHECK_BASE_URL secret), so any ubuntu-latest runner can reach it.
+#
+# Runs with secrets on fork PRs too: never check out or run the PR's code.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 permissions:
@@ -41,29 +43,11 @@ jobs:
   grill:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      # GitHub does not pass secrets to workflow runs triggered by a PR
-      # from a fork, and gives those runs a read-only token. Without this
-      # check the curl below sends `Authorization: Bearer ` (empty), takes
-      # a 401, and fails the job — presenting "your PR is broken" to an
-      # outside contributor who did nothing wrong and cannot fix it.
-      #
-      # Deliberately NOT solved with `pull_request_target`: that runs the
-      # workflow with secrets against the *base* repo while checking out
-      # untrusted head code, a well-known privilege-escalation footgun. A
-      # maintainer who wants fork PRs gated should run the gate after
-      # merging to a trusted branch. A skipped fork PR never gets a
-      # `vibecheck/verdict` status, so if that's a required check, merging one
-      # takes a maintainer bypassing the requirement.
       - name: Check vibecheck is configured for this run
         id: config
         env:
           VIBECHECK_BASE_URL: ${{ secrets.VIBECHECK_BASE_URL || secrets.GRUMPY_BASE_URL }}
           VIBECHECK_TOKEN: ${{ secrets.VIBECHECK_TOKEN || secrets.GRUMPY_TOKEN }}
-          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
         run: |
           set -euo pipefail
 
@@ -73,13 +57,7 @@ jobs:
           fi
 
           echo "configured=false" >> "$GITHUB_OUTPUT"
-
-          if [ "$IS_FORK" = "true" ]; then
-            reason="this PR is from a fork, and GitHub does not share repository secrets with fork PR runs"
-          else
-            reason="the VIBECHECK_BASE_URL and/or VIBECHECK_TOKEN repository secrets are not set"
-          fi
-
+          reason="the VIBECHECK_BASE_URL and/or VIBECHECK_TOKEN repository secrets are not set"
           echo "::notice title=vibecheck skipped::Not run because $reason."
           {
             echo "### vibecheck: SKIPPED"
@@ -97,19 +75,24 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          # Three dots, not two. `git diff A B` is a straight tree-to-tree
-          # comparison, and github.event.pull_request.base.sha is the tip
-          # of the base branch at event time, NOT the merge base. So once
-          # anything lands on the base branch after this PR was opened, a
-          # two-dot diff also contains the *reverse* of those commits —
-          # code the PR author never touched, presented to them as their
-          # own change and to the grader as a claim about this diff.
+          # Three dots, not two. github.event.pull_request.base.sha is the
+          # tip of the base branch at event time, NOT the merge base. So
+          # once anything lands on the base branch after this PR was
+          # opened, a two-dot diff also contains the *reverse* of those
+          # commits — code the PR author never touched, presented to them as
+          # their own change and to the grader as a claim about this diff.
           # `A...B` diffs from the merge base, which is what "the whole PR
           # against its base" actually means.
-          git diff "$BASE_SHA...$HEAD_SHA" > /tmp/vibecheck.diff
+          if ! gh api "repos/$REPO/compare/$BASE_SHA...$HEAD_SHA" \
+              -H "Accept: application/vnd.github.diff" > /tmp/vibecheck.diff; then
+            echo "::warning title=vibecheck unavailable::Could not fetch this PR's diff from the GitHub API."
+            echo "### vibecheck: UNAVAILABLE (could not fetch the diff), not blocking" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
 
           # Called on every run, not only when no session exists yet. It's
           # idempotent — a re-run gets the existing session back with a 200
