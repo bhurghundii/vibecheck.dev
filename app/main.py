@@ -199,6 +199,17 @@ async def create_session(payload: CreateSessionRequest, request: Request) -> JSO
                 payload.diff, question_count_for(payload.diff, settings)
             )
         except GradingError as exc:
+            # The caller only gets the 502 body, so log why for the operator.
+            request_logger.warning(
+                "grading call failed",
+                extra={
+                    "repo": payload.repo,
+                    "pr_number": payload.pr_number,
+                    "head_sha": payload.head_sha,
+                    "outcome": "create_failed",
+                },
+                exc_info=True,
+            )
             return JSONResponse(
                 status_code=502, content={"detail": f"could not build the walkthrough: {exc}"}
             )

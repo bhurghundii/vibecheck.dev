@@ -55,6 +55,14 @@
   rule, unchanged, so nothing changes unless you set either variable. Each
   answer records the level it was graded at, in `answers.strictness`.
 
+**Fixed**
+
+- When the model call fails while `POST /sessions` builds the walkthrough,
+  the server now logs why (`outcome: create_failed`, with the error), not
+  just `outcome: error`. Before, the reason, such as Bedrock refusing a model
+  whose use-case form isn't on file, was only in the `502` body the Action
+  received.
+
 ## Unreleased — public release preparation
 
 Findings from a pre-release audit, fixed.
