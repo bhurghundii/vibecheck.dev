@@ -7,3 +7,11 @@ __pycache__/
 # Local Claude Code settings
 .claude/settings.local.json
 site/
+
+# JetBrains IDE project files
+.idea/
+*.iml
+
+# Output of local build/coverage runs
+.build-truth/
+.coverage
