@@ -1,0 +1,20 @@
+# vibecheck for the pre-commit framework (https://pre-commit.com).
+#
+# `language: script` runs the stdlib-only hook from this checkout with no
+# install step. pre-commit 4.4.0 renamed it `unsupported_script` and keeps
+# `script` as an alias slated for removal; `script` is kept because it works
+# from 3.2.0 onwards, while the new name would need 4.4.0. Switch when the alias
+# goes. 3.2.0 is also the first release that spells the stage `pre-commit`.
+#
+# `verbose: true` because pre-commit hides the output of a hook that exits 0,
+# and every fail-open warning (unset token, server down) exits 0.
+- id: vibecheck
+  name: vibecheck
+  description: Quiz the author on their staged diff before the commit lands.
+  entry: scripts/pre_commit_hook.py
+  language: script
+  minimum_pre_commit_version: '3.2.0'
+  stages: [pre-commit]
+  pass_filenames: false
+  always_run: true
+  verbose: true
