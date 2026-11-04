@@ -55,8 +55,14 @@
   rule, unchanged, so nothing changes unless you set either variable. Each
   answer records the level it was graded at, in `answers.strictness`.
 
+- AWS ECS deployment template and guide. `deploy/aws-ecs/vibecheck.yaml`
+  is one CloudFormation stack: the app on ECS Fargate behind a load
+  balancer, RDS PostgreSQL 16, and grading through Claude on Amazon Bedrock
+  with the task's IAM role, so no API key is stored. The new *Deploying to
+  AWS ECS* page walks through building the image, deploying the stack,
+  wiring up a repo, what it costs to run, and tearing it down.
+  
 **Fixed**
-
 - When the model call fails while `POST /sessions` builds the walkthrough,
   the server now logs why (`outcome: create_failed`, with the error), not
   just `outcome: error`. Before, the reason, such as Bedrock refusing a model
