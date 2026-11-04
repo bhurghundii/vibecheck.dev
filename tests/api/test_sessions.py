@@ -8,10 +8,13 @@ tests/api/test_idempotency.py — a sequential test here proves nothing about th
 
 from __future__ import annotations
 
+import logging
 import secrets
 
 from fastapi.testclient import TestClient
 
+from app.ai.grading import FakeGrader, GradingError
+from app.logging.config import JsonFormatter
 from app.main import app
 
 _VALID_BODY = {
@@ -216,3 +219,35 @@ def test_a_tiny_diff_gets_only_the_high_level_question(vibecheck_env) -> None:
         assert resp.status_code in (200, 201)
         page = client.get(resp.json()["session_url"])
     assert "Question 1 of 1" in page.text
+
+
+def test_grading_failure_on_create_logs_why_and_returns_502(vibecheck_env) -> None:
+    # The Action only gets the 502 body; without this line an operator reading
+    # the server's logs sees `outcome: error` and nothing about the cause.
+    class FailingGrader(FakeGrader):
+        async def interpret(self, diff):
+            raise GradingError("model API returned 404: Model use case details have not been submitted")
+
+    emitted: list[str] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            emitted.append(self.format(record))
+
+    body = {**_VALID_BODY, "repo": _unique_repo("create-fail")}
+    with TestClient(app) as client:
+        app.state.grader = FailingGrader()
+        handler = Capture()
+        handler.setFormatter(JsonFormatter())
+        root = logging.getLogger()
+        root.addHandler(handler)
+        try:
+            response = client.post("/sessions", json=body, headers=_headers(vibecheck_env.token))
+        finally:
+            root.removeHandler(handler)
+
+    assert response.status_code == 502
+    failures = [line for line in emitted if '"outcome": "create_failed"' in line]
+    assert len(failures) == 1
+    assert "use case details have not been submitted" in failures[0]
+    assert body["repo"] in failures[0]

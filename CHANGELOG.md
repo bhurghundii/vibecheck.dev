@@ -4,6 +4,11 @@
 
 **Changed**
 
+- The server's dependencies moved to a `server` dependency group so the
+  package itself only needs `httpx`. `uv sync` still installs everything; if
+  you build your own image, install with `uv sync --frozen --no-dev
+  --no-install-project` as the Dockerfile now does. The package is now named
+  `vibecheck-dev`.
 - Fork PRs are gated. The workflow now runs on `pull_request_target`
   instead of `pull_request`, so fork PRs get the secrets and are asked a
   question like any other PR; before, they were skipped. The diff comes
@@ -20,6 +25,21 @@
   remove it or switch it to `grumpy/verdict`.
 
 **Added**
+
+- A local `vibecheck` command: the same walkthrough in your terminal, against
+  your branch (`vibecheck`), a PR (`vibecheck --pr 123`) or a diff file, with
+  your own `ANTHROPIC_API_KEY` and no server. Practice only; it stores nothing
+  and posts no status. Install with `brew install bhurghundii/tap/vibecheck`
+  or `pipx install git+https://github.com/bhurghundii/vibecheck.dev`.
+- The release workflow regenerates the Homebrew formula on each tag and pushes
+  it to `bhurghundii/homebrew-tap` when `HOMEBREW_TAP_TOKEN` is set.
+- Amazon Bedrock as a grading backend. Set `MODEL_PROVIDER=bedrock`,
+  `BEDROCK_MODEL_ID` and `AWS_REGION` to grade through Bedrock's Converse
+  API in your own AWS account, with any Converse-capable model.
+  Credentials come from the standard AWS chain (env vars, profile, task or
+  instance role, IRSA) or a Bedrock API key in `AWS_BEARER_TOKEN_BEDROCK`.
+  `MODEL_PROVIDER` defaults to `anthropic`, so nothing changes unless you
+  set it.
 
 - `EVALUATOR`, a JSON config of checks that reject a PR before grumpy asks
   anything. The first is `size`: more than 1000 changed lines (added +
@@ -41,6 +61,13 @@
   with the task's IAM role, so no API key is stored. The new *Deploying to
   AWS ECS* page walks through building the image, deploying the stack,
   wiring up a repo, what it costs to run, and tearing it down.
+  
+**Fixed**
+- When the model call fails while `POST /sessions` builds the walkthrough,
+  the server now logs why (`outcome: create_failed`, with the error), not
+  just `outcome: error`. Before, the reason, such as Bedrock refusing a model
+  whose use-case form isn't on file, was only in the `502` body the Action
+  received.
 
 ## Unreleased — public release preparation
 
