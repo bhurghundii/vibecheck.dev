@@ -11,15 +11,23 @@ It's written for someone who hasn't used AWS much. Every step is an AWS CLI comm
 
 - **An AWS account and the AWS CLI v2**, signed in with permission to create the stack's resources (for a first trial, an administrator user or role is simplest). Check with `aws sts get-caller-identity`.
 - **A region**, picked once and used for everything below. The examples use `us-east-1`.
-- **Bedrock access to the Claude model you'll grade with, in that region.** Anthropic models need a one-time use-case form per AWS account before the first call: open the [Bedrock console](https://console.aws.amazon.com/bedrock/home), pick the model in *Model catalog* and submit the form when asked. Then check:
+- **Bedrock access to the Claude model you'll grade with, in that region.** Anthropic models need a one-time use-case form per AWS account before the first call: open the [Bedrock console](https://console.aws.amazon.com/bedrock/home), pick the model in *Model catalog* and submit the form when asked. Check the form is on file; this fails with `ResourceNotFoundException` until it is:
 
     ```sh
-    aws bedrock get-foundation-model-availability \
-      --region us-east-1 --model-id anthropic.claude-sonnet-4-6
+    aws bedrock get-use-case-for-model-access --region us-east-1
     ```
 
-    `agreementAvailability.status` should be `AVAILABLE`. `PENDING` means AWS is still setting up the agreement; calls fail with `AccessDeniedException` until it changes.
-- **A model ID for `BedrockModelId`.** In most regions Claude is served through a cross-region *inference profile* rather than an in-region model, so use a profile ID such as `us.anthropic.claude-sonnet-4-6`. List the ones your region offers with `aws bedrock list-inference-profiles --region us-east-1 --type-equals SYSTEM_DEFINED`.
+    AWS says the form can take up to 15 minutes to take effect; in our test it took about two. Don't treat one successful call made before submitting the form as proof of access: we saw a first call succeed and later ones refused until the form was on file.
+- **A model ID for `BedrockModelId`.** In most regions Claude is served through a cross-region *inference profile* rather than an in-region model, so use a profile ID such as `us.anthropic.claude-sonnet-4-6`. List the ones your region offers with `aws bedrock list-inference-profiles --region us-east-1 --type-equals SYSTEM_DEFINED`. A profile can be listed and still not be available to your account, so call the exact ID you'll deploy with before you deploy:
+
+    ```sh
+    aws bedrock-runtime converse --region us-east-1 \
+      --model-id us.anthropic.claude-sonnet-4-6 \
+      --messages '[{"role":"user","content":[{"text":"Reply with: ok"}]}]' \
+      --inference-config maxTokens=10
+    ```
+
+    If your account is limited to a single region, cross-region profiles still work: an `eu.` profile called from `eu-north-1` routed normally in our test.
 - **A container image Fargate can pull**: in Amazon ECR in the same account and region (the next section builds one), or in a public registry. The template takes no registry credentials, so a private registry outside ECR won't work.
 - **Docker**, if you're building the image yourself.
 
@@ -85,7 +93,7 @@ Optional parameters, all left unset above:
 
 - `CertificateArn`: an ACM certificate for HTTPS. Read [HTTP is for trials only](#http-is-for-trials-only) before going without one.
 - `PublicBaseUrl`: the URL people will use, if you put your own domain in front of the load balancer. Without it the stack uses the load balancer's DNS name.
-- `GitHubStatusTokenSecretArn`: a Secrets Manager secret holding `GITHUB_STATUS_TOKEN`, so vibecheck can post the `vibecheck/verdict` status. Create it first with `aws secretsmanager create-secret --name vibecheck/github-status-token --secret-string file://github-token.txt` and pass the `ARN` it prints.
+- `GitHubStatusTokenSecretArn`: a Secrets Manager secret holding `GITHUB_STATUS_TOKEN`, so vibecheck can post the `vibecheck/verdict` status. Create it first with `aws secretsmanager create-secret --name vibecheck/github-status-token --secret-string file://github-token.txt`, pass the `ARN` it prints, and delete `github-token.txt` afterwards.
 - `AllowedRepos`: the repos allowed to create sessions; see [configuration](configuration.md).
 - `LoadBalancerScheme`: `internet-facing` by default. GitHub's hosted runners must reach the server, so keep it unless your runners are inside the VPC.
 
@@ -96,7 +104,15 @@ aws cloudformation describe-stacks --region $REGION --stack-name vibecheck \
   --query 'Stacks[0].Outputs' --output table
 ```
 
-`BaseUrl` is the server's URL. `curl $BASE_URL/healthz` should return `{"status": "ok"}`.
+`BaseUrl` is the server's URL. Check it's up:
+
+```sh
+BASE_URL=$(aws cloudformation describe-stacks --region $REGION --stack-name vibecheck \
+  --query "Stacks[0].Outputs[?OutputKey=='BaseUrl'].OutputValue" --output text)
+curl $BASE_URL/healthz
+```
+
+It should return `{"status": "ok"}`.
 
 ## Wire up the repo
 
@@ -134,9 +150,11 @@ Outside the stack, you also pay for the ECR repository's image storage and for a
 
 ## Troubleshooting
 
+**Creating a session fails with `502`: `model API returned 404: Model use case details have not been submitted for this account`.** The Anthropic use-case form isn't on file (see [prerequisites](#prerequisites)). Bedrock reports this as `ResourceNotFoundException`, not `AccessDeniedException`. Submit the form, wait a few minutes and try again; nothing in the stack needs to change. The task logs (below) show it as `grading call failed` with `outcome: create_failed`.
+
 **Grading fails with `AccessDeniedException` from Bedrock.** The task logs (below) show the error. Check, in order:
 
-1. *Model access.* Run the `get-foundation-model-availability` command from the prerequisites for the model behind your profile. Anything but `AVAILABLE` means the use-case form isn't done or AWS is still processing it.
+1. *Model availability.* `<model> is not available for this account` means your account can't use that model, even if its profile is listed for your region. Pick another `BedrockModelId`, after checking it with the `converse` command from the prerequisites.
 2. *IAM.* The task role may call `bedrock:InvokeModel` on `BedrockModelId` and nothing else. If you changed the model the app uses without changing the parameter, redeploy with the new `BedrockModelId`. An organization service control policy that denies Bedrock also shows up as `AccessDeniedException`.
 3. *Inference-profile foundation models.* A profile such as `us.anthropic.claude-sonnet-4-6` routes each call to the underlying foundation model in one of several regions, and the call needs permission on that model in whichever region it lands. List them with `aws bedrock get-inference-profile --region $REGION --inference-profile-identifier us.anthropic.claude-sonnet-4-6 --query 'models[].modelArn'`. The template grants the foundation models behind the profile; if a destination region is blocked by a service control policy, or a region is disabled for the account, some calls fail and others succeed.
 
@@ -158,7 +176,7 @@ ECS's own view of why tasks stopped is in the service events: `aws ecs describe-
 
 ## Teardown
 
-Delete the stack, then the two things it leaves behind:
+Delete the stack, then the two things it leaves behind. The stack delete takes 10 to 15 minutes, most of it the database's final snapshot:
 
 ```sh
 aws cloudformation delete-stack --region $REGION --stack-name vibecheck
@@ -166,7 +184,8 @@ aws cloudformation wait stack-delete-complete --region $REGION --stack-name vibe
 
 # The database's final snapshot is retained on purpose, so a delete can't lose data.
 aws rds describe-db-snapshots --region $REGION --snapshot-type manual \
-  --query 'DBSnapshots[].[DBSnapshotIdentifier,SnapshotCreateTime]' --output table
+  --query "DBSnapshots[?starts_with(DBSnapshotIdentifier, 'vibecheck-snapshot')].[DBSnapshotIdentifier,SnapshotCreateTime]" \
+  --output table
 aws rds delete-db-snapshot --region $REGION --db-snapshot-identifier <the snapshot from the stack>
 
 aws ecr delete-repository --region $REGION --repository-name vibecheck --force
