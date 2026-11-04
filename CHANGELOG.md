@@ -33,6 +33,14 @@
   or `pipx install git+https://github.com/bhurghundii/vibecheck.dev`.
 - The release workflow regenerates the Homebrew formula on each tag and pushes
   it to `bhurghundii/homebrew-tap` when `HOMEBREW_TAP_TOKEN` is set.
+- Amazon Bedrock as a grading backend. Set `MODEL_PROVIDER=bedrock`,
+  `BEDROCK_MODEL_ID` and `AWS_REGION` to grade through Bedrock's Converse
+  API in your own AWS account, with any Converse-capable model.
+  Credentials come from the standard AWS chain (env vars, profile, task or
+  instance role, IRSA) or a Bedrock API key in `AWS_BEARER_TOKEN_BEDROCK`.
+  `MODEL_PROVIDER` defaults to `anthropic`, so nothing changes unless you
+  set it.
+
 - `EVALUATOR`, a JSON config of checks that reject a PR before grumpy asks
   anything. The first is `size`: more than 1000 changed lines (added +
   removed, outside lockfiles by default) and `POST /sessions` returns `422`
@@ -46,6 +54,14 @@
   critical one demands complete ones. `standard` is the existing grading
   rule, unchanged, so nothing changes unless you set either variable. Each
   answer records the level it was graded at, in `answers.strictness`.
+
+**Fixed**
+
+- When the model call fails while `POST /sessions` builds the walkthrough,
+  the server now logs why (`outcome: create_failed`, with the error), not
+  just `outcome: error`. Before, the reason, such as Bedrock refusing a model
+  whose use-case form isn't on file, was only in the `502` body the Action
+  received.
 
 ## Unreleased — public release preparation
 

@@ -40,6 +40,9 @@ server = [
     # result before it's marked safe for Jinja2.
     "markdown>=3.11.2",
     "nh3>=0.3.7",
+    # app/ai/grading.py's BedrockGrader: only the AWS credential chain and
+    # SigV4 signing. Requests still go over async httpx, never a boto client.
+    "botocore>=1.40",
 ]
 dev = [
     "pytest>=9.1.1",
