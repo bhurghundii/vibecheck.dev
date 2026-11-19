@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>vibecheck - quizzes your team on their AI's code before it merges</title>
-<meta name="description" content="A self-hosted merge gate for GitHub pull requests. Before a PR can merge, the person who opened it has to show they understand their own change.">
-<meta property="og:title" content="vibecheck">
+<title>vibecheck - Proof of Work for Vibe Check</title>
+<meta name="description" content="Proof of Work for Vibe Check. A self-hosted merge gate for GitHub pull requests: before a PR can merge, the person who opened it has to show they understand their own change.">
+<meta property="og:title" content="vibecheck - Proof of Work for Vibe Check">
 <meta property="og:description" content="Quizzes your team on their AI's code before it merges. A self-hosted merge gate for GitHub pull requests.">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#0f0d0c" media="(prefers-color-scheme: dark)">
@@ -14,259 +14,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --bg: #faf7f2;
-    --bg-alt: #f3eee6;
-    --surface: #ffffff;
-    --text: #1c1917;
-    --muted: #6b635b;
-    --line: #e5ddd2;
-    --accent: #e8470f;
-    --accent-ink: #ffffff;
-    --accent-soft: #fde6dc;
-    --pass: #1a7f37;
-    --fail: #c4291c;
-    --code-bg: #f6f3ee;
-    --add-bg: #e6f4ea;
-    --add: #1a7f37;
-    --del-bg: #fbe7e5;
-    --del: #b3261e;
-    --shadow: 0 1px 2px rgba(28, 25, 23, .06), 0 12px 40px -12px rgba(28, 25, 23, .18);
-    --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-    --display: "Space Grotesk", var(--sans);
-    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f0d0c;
-      --bg-alt: #161311;
-      --surface: #1b1816;
-      --text: #f2ede7;
-      --muted: #a39a90;
-      --line: #2e2925;
-      --accent: #ff6a33;
-      --accent-ink: #1a0b04;
-      --accent-soft: #3a1c10;
-      --pass: #4ac26b;
-      --fail: #ff7b72;
-      --code-bg: #141110;
-      --add-bg: rgba(46, 160, 67, .16);
-      --add: #6fdd8b;
-      --del-bg: rgba(248, 81, 73, .14);
-      --del: #ff9b94;
-      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 20px 50px -20px rgba(0, 0, 0, .8);
-    }
-  }
-
-  *, *::before, *::after { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    overflow-x: hidden;
-    background: var(--bg);
-    color: var(--text);
-    font: 400 17px/1.6 var(--sans);
-    -webkit-font-smoothing: antialiased;
-  }
-  a { color: inherit; }
-  code, pre { font-family: var(--mono); }
-  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
-  @media (max-width: 600px) { .wrap { padding: 0 16px; } }
-
-  /* Nav */
-  header.nav {
-    position: sticky; top: 0; z-index: 10;
-    background: color-mix(in srgb, var(--bg) 85%, transparent);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid var(--line);
-  }
-  header.nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
-  .brand { display: flex; align-items: center; gap: 10px; font: 700 19px var(--display); text-decoration: none; letter-spacing: -.01em; }
-  .brand-mark { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; }
-  .brand-mark svg { width: 16px; height: 16px; }
-  .nav-links { display: flex; gap: 28px; font-size: 15px; color: var(--muted); }
-  .nav-links a { text-decoration: none; }
-  .nav-links a:hover { color: var(--text); }
-  @media (max-width: 760px) { .nav-links .hide-sm { display: none; } .nav-links { gap: 18px; } }
-
-  /* Buttons */
-  .btn {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 12px 20px; border-radius: 10px;
-    font: 600 15px var(--sans); text-decoration: none;
-    border: 1px solid var(--line); background: var(--surface); color: var(--text);
-    transition: transform .15s ease, border-color .15s ease;
-  }
-  .btn:hover { transform: translateY(-1px); border-color: var(--muted); }
-  .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-  .btn-primary:hover { border-color: var(--accent); filter: brightness(1.05); }
-
-  /* Hero */
-  .hero { padding: 72px 0 88px; }
-  .hero .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 56px; align-items: center; }
-  @media (max-width: 960px) { .hero .wrap { grid-template-columns: minmax(0, 1fr); gap: 44px; } .hero { padding: 48px 0 64px; } }
-  .eyebrow {
-    display: inline-block; font: 500 13px var(--mono); color: var(--accent);
-    background: var(--accent-soft); padding: 5px 10px; border-radius: 6px; margin-bottom: 22px;
-  }
-  h1 {
-    font: 700 clamp(40px, 6vw, 62px)/1.04 var(--display);
-    letter-spacing: -.03em; margin: 0 0 22px;
-  }
-  h1 em { font-style: normal; color: var(--accent); }
-  .lede { font-size: 19px; color: var(--muted); margin: 0 0 32px; max-width: 34em; }
-  .lede strong { color: var(--text); font-weight: 600; }
-  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; }
-  .facts { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 28px 0 0; padding: 0; list-style: none; font: 400 13px var(--mono); color: var(--muted); }
-  .facts li::before { content: "+ "; color: var(--accent); }
-
-  /* Mock exam window */
-  .window {
-    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
-    box-shadow: var(--shadow); overflow: hidden; min-width: 0;
-  }
-  .window-bar {
-    display: flex; align-items: center; gap: 12px; padding: 11px 14px;
-    border-bottom: 1px solid var(--line); background: var(--bg-alt);
-  }
-  .dots { display: flex; gap: 6px; }
-  .dots span { width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
-  .url { flex: 1; font: 400 12px var(--mono); color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .window-body { padding: 22px 22px 20px; }
-  .exam-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-  .exam-head .repo { font-family: var(--mono); }
-  .exam-q { font: 600 18px/1.4 var(--display); margin: 0 0 14px; letter-spacing: -.01em; }
-  .slice-cap { font: 400 12px var(--mono); color: var(--muted); margin: 0 0 6px; }
-  pre.slice {
-    margin: 0 0 16px; padding: 10px 0; background: var(--code-bg);
-    border: 1px solid var(--line); border-radius: 8px;
-    font-size: 12.5px; line-height: 1.65; overflow-x: auto;
-  }
-  pre.slice > span { display: block; padding: 0 14px; white-space: pre; }
-  pre.slice .g { color: var(--muted); opacity: .6; user-select: none; margin-right: 10px; }
-  pre.slice .add { background: var(--add-bg); color: var(--add); }
-  pre.slice .del { background: var(--del-bg); color: var(--del); }
-  .answer {
-    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
-    font-size: 15px; background: var(--bg); margin-bottom: 14px;
-  }
-  .answer::after { content: ""; display: inline-block; width: 2px; height: 1.05em; background: var(--text); vertical-align: -2px; margin-left: 2px; animation: blink 1s steps(1) infinite; }
-  @keyframes blink { 50% { opacity: 0; } }
-  .verdict { border-left: 3px solid var(--fail); background: var(--bg-alt); border-radius: 0 8px 8px 0; padding: 10px 14px; font-size: 14.5px; }
-  .verdict-label { font-weight: 600; color: var(--fail); margin-right: 4px; }
-  .verdict [data-tone] { display: none; }
-  .window[data-mode="sarcastic"] .verdict [data-tone="sarcastic"],
-  .window[data-mode="professional"] .verdict [data-tone="professional"] { display: inline; }
-  .exam-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; font-size: 13px; color: var(--muted); }
-  .toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; padding: 2px; background: var(--bg); }
-  .toggle button {
-    border: 0; background: transparent; color: var(--muted); font: 500 12.5px var(--sans);
-    padding: 5px 10px; border-radius: 6px; cursor: pointer;
-  }
-  .toggle button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
-  .check {
-    display: flex; align-items: center; gap: 10px; padding: 12px 16px;
-    border-top: 1px solid var(--line); background: var(--bg-alt); font-size: 13.5px;
-  }
-  .check .ring { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #d4a72c; flex: none; }
-  .check code { font-size: 13px; font-weight: 500; }
-  .check .msg { color: var(--muted); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .badge { font: 500 11px var(--sans); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; color: var(--muted); }
-
-  /* Sections */
-  section { padding: 88px 0; }
-  section.alt { background: var(--bg-alt); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-  @media (max-width: 600px) { section { padding: 64px 0; } }
-  .kicker { font: 500 13px var(--mono); color: var(--accent); margin: 0 0 12px; text-transform: lowercase; }
-  h2 { font: 700 clamp(30px, 4vw, 42px)/1.12 var(--display); letter-spacing: -.025em; margin: 0 0 16px; max-width: 22em; }
-  .section-lede { color: var(--muted); font-size: 18px; max-width: 40em; margin: 0 0 48px; }
-
-  /* Problem */
-  .problem { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: center; }
-  @media (max-width: 860px) { .problem { grid-template-columns: minmax(0, 1fr); gap: 32px; } }
-  .problem p { color: var(--muted); margin: 0 0 16px; }
-  .problem p strong { color: var(--text); }
-  .lgtm {
-    font: 700 clamp(44px, 7vw, 76px)/1 var(--display); letter-spacing: -.03em;
-    color: var(--text); margin: 0;
-  }
-  .lgtm span { display: block; color: var(--muted); font-size: .42em; letter-spacing: -.01em; margin-top: 14px; font-weight: 500; }
-  .lgtm s { text-decoration-color: var(--accent); text-decoration-thickness: 5px; }
-
-  /* Steps */
-  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; counter-reset: step; padding: 0; margin: 0; list-style: none; }
-  @media (max-width: 960px) { .steps { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 560px) { .steps { grid-template-columns: 1fr; } }
-  .steps li { counter-increment: step; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px; }
-  .steps li::before { content: "0" counter(step); display: block; font: 500 13px var(--mono); color: var(--accent); margin-bottom: 14px; }
-  .steps h3 { font: 600 19px/1.3 var(--display); margin: 0 0 8px; letter-spacing: -.01em; }
-  .steps p { margin: 0; color: var(--muted); font-size: 15.5px; }
-
-  /* Features */
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-  @media (max-width: 960px) { .grid { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
-  .grid > div { background: var(--surface); padding: 28px; }
-  .grid h3 { font: 600 18px/1.3 var(--display); margin: 0 0 8px; letter-spacing: -.01em; }
-  .grid p { margin: 0; color: var(--muted); font-size: 15.5px; }
-  .grid code { font-size: .88em; background: var(--code-bg); border: 1px solid var(--line); padding: 1px 5px; border-radius: 4px; }
-
-  /* Audience */
-  .audience { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
-  @media (max-width: 760px) { .audience { grid-template-columns: 1fr; } }
-  .audience > div { border: 1px solid var(--line); border-radius: 14px; padding: 26px; background: var(--surface); }
-  .audience h3 { font: 600 19px var(--display); margin: 0 0 8px; }
-  .audience p { margin: 0; color: var(--muted); font-size: 15.5px; }
-
-  /* Demos */
-  .demos { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-  @media (max-width: 760px) { .demos { grid-template-columns: 1fr; } }
-  .demo {
-    display: block; text-decoration: none; border: 1px solid var(--line); border-radius: 14px;
-    padding: 26px; background: var(--surface); transition: transform .15s ease, border-color .15s ease;
-  }
-  .demo:hover { transform: translateY(-2px); border-color: var(--muted); }
-  .demo .status { display: inline-flex; align-items: center; gap: 8px; font: 500 13px var(--mono); margin-bottom: 14px; }
-  .demo .status i { width: 10px; height: 10px; border-radius: 50%; }
-  .demo.pass .status { color: var(--pass); } .demo.pass .status i { background: var(--pass); }
-  .demo.fail .status { color: var(--fail); } .demo.fail .status i { background: var(--fail); }
-  .demo h3 { font: 600 20px var(--display); margin: 0 0 6px; }
-  .demo p { margin: 0; color: var(--muted); font-size: 15.5px; }
-  .demo .go { display: inline-block; margin-top: 16px; font-weight: 600; font-size: 15px; }
-
-  /* Quickstart */
-  .qs { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 48px; align-items: start; }
-  @media (max-width: 900px) { .qs { grid-template-columns: minmax(0, 1fr); gap: 28px; } }
-  .qs ul { margin: 0 0 28px; padding: 0; list-style: none; }
-  .qs li { padding: 10px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 15.5px; }
-  .qs li strong { color: var(--text); font-weight: 600; }
-  pre.term {
-    margin: 0; background: #14110f; color: #e9e3dc; border-radius: 14px; padding: 22px 24px;
-    font-size: 13.5px; line-height: 1.75; overflow-x: auto; border: 1px solid var(--line); box-shadow: var(--shadow);
-  }
-  pre.term .c { color: #8a8077; }
-  pre.term .p { color: #ff7a45; user-select: none; }
-  pre.term .o { color: #6fdd8b; }
-
-  /* Closing CTA */
-  .closing { text-align: center; }
-  .closing h2 { margin-left: auto; margin-right: auto; }
-  .closing .section-lede { margin-left: auto; margin-right: auto; margin-bottom: 32px; }
-  .closing .cta-row { justify-content: center; }
-
-  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; color: var(--muted); font-size: 14px; }
-  footer .wrap { display: flex; justify-content: space-between; gap: 16px 32px; flex-wrap: wrap; }
-  footer nav { display: flex; gap: 20px; flex-wrap: wrap; }
-  footer a { text-decoration: none; } footer a:hover { color: var(--text); }
-  footer .dedication { flex-basis: 100%; font-style: italic; font-size: 13px; }
-
-  @media (prefers-reduced-motion: reduce) {
-    html { scroll-behavior: auto; }
-    .answer::after { animation: none; }
-    .btn, .demo { transition: none; }
-  }
-</style>
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 
@@ -279,6 +27,7 @@
     <nav class="nav-links">
       <a class="hide-sm" href="#how">How it works</a>
       <a class="hide-sm" href="#features">Features</a>
+      <a href="/blog">Blog</a>
       <a href="https://bhurghundii.com/vibecheck.dev/">Docs</a>
       <a href="https://github.com/bhurghundii/vibecheck.dev">GitHub</a>
     </nav>
@@ -290,8 +39,8 @@
     <div class="wrap">
       <div>
         <span class="eyebrow">self-hosted merge gate for GitHub PRs</span>
-        <h1>Quizzes your team on their <em>AI's code</em> before it merges.</h1>
-        <p class="lede">Before a PR can merge, the person who opened it has to show they understand their own change. <strong>vibecheck does not review the code for you. It checks that the author can.</strong></p>
+        <h1>Proof of Work for <em>Vibe Check</em>.</h1>
+        <p class="lede">vibecheck quizzes your team on their AI's code before it merges. The person who opened the PR has to show they understand their own change. <strong>vibecheck does not review the code for you. It checks that the author can.</strong></p>
         <div class="cta-row">
           <a class="btn btn-primary" href="https://calendly.com/bhurghundii/30min">Book a call</a>
           <a class="btn" href="https://bhurghundii.com/vibecheck.dev/quickstart/">Read the quickstart</a>
@@ -446,7 +195,26 @@
     </div>
   </section>
 
-  <section class="alt closing">
+  <section id="blog" class="alt">
+    <div class="wrap">
+      <p class="kicker">// blog</p>
+      <h2>Notes from the merge gate.</h2>
+      <p class="section-lede">What we are building, why, and what we learn from quizzing people on code they did not write.</p>
+      <!-- Latest posts. Keep in sync with blog/index.html. -->
+      <ul class="posts posts-home">
+        <li>
+          <a href="/blog/why-vibecheck">
+            <time datetime="2026-10-25">25 Oct 2026</time>
+            <h3>Why vibecheck exists</h3>
+            <p>"LGTM, CI is green" is the most expensive sentence in software. Here is the problem vibecheck is trying to fix.</p>
+          </a>
+        </li>
+      </ul>
+      <div class="cta-row posts-more"><a class="btn" href="/blog">All posts</a></div>
+    </div>
+  </section>
+
+  <section class="closing">
     <div class="wrap">
       <p class="kicker">// get it</p>
       <h2>Want this in front of your PRs?</h2>
@@ -463,6 +231,7 @@
   <div class="wrap">
     <span>vibecheck is MIT licensed.</span>
     <nav>
+      <a href="/blog">Blog</a>
       <a href="https://bhurghundii.com/vibecheck.dev/">Docs</a>
       <a href="https://github.com/bhurghundii/vibecheck.dev">GitHub</a>
       <a href="https://github.com/bhurghundii/vibecheck.dev/blob/main/SECURITY.md">Security</a>
